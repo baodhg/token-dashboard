@@ -1,23 +1,19 @@
 "use client";
 
 import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
-import type { DataPoint } from "@/lib/mock-data";
+import type { DataPoint, Period } from "@/lib/mock-data";
 
 interface Props {
   data: DataPoint[];
+  period: Period;
 }
 
 function formatK(n: number) {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
 
@@ -25,89 +21,96 @@ function formatK(n: number) {
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-white rounded-xl shadow-lg border border-black/5 px-4 py-3 text-sm">
-      <p className="font-semibold text-[#1c1c1e] mb-2">{label}</p>
+    <div className="bg-card rounded-xl shadow-lg border border-border px-4 py-3 text-sm min-w-35">
+      <p className="font-semibold text-foreground mb-2 font-numeric">{label}</p>
       {payload.map((p: { name: string; value: number; color: string }) => (
-        <div key={p.name} className="flex items-center gap-2 text-[#3c3c43]">
-          <span className="w-2 h-2 rounded-full" style={{ background: p.color }} />
-          <span className="capitalize">{p.name}:</span>
-          <span className="font-semibold ml-auto pl-4">{formatK(p.value)}</span>
+        <div key={p.name} className="flex items-center justify-between gap-4 mb-0.5">
+          <div className="flex items-center gap-1.5 text-[#3c3c43] dark:text-[#c7c7cc]">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+            <span className="text-[11px]">{p.name}</span>
+          </div>
+          <span className="font-numeric text-[12px] font-semibold text-foreground">{formatK(p.value)}</span>
         </div>
       ))}
     </div>
   );
 }
 
-export default function TokenChart({ data }: Props) {
-  const maxTick = Math.max(...data.map((d) => d.input + d.output + d.cache));
-  const ticks = Array.from({ length: 5 }, (_, i) =>
-    Math.round((maxTick / 4) * i)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function CustomLegend({ payload }: any) {
+  return (
+    <div className="flex items-center gap-5 justify-end mb-2">
+      {payload?.map((p: { value: string; color: string }) => (
+        <span key={p.value} className="flex items-center gap-1.5 text-[11px] text-[#8e8e93] dark:text-[#98989d]">
+          <span className="w-8 h-0.5 inline-block rounded-full" style={{ background: p.color }} />
+          {p.value}
+        </span>
+      ))}
+    </div>
   );
+}
+
+const X_INTERVAL: Record<Period, number> = {
+  "1d": 3,   // every 4 hours → 6 labels
+  "3d": 2,   // every 3rd point → 4 labels
+  "5d": 0,
+  "1w": 0,
+  "1m": 4,   // every 5 days → 6 labels
+  "1y": 0,
+};
+
+export default function TokenChart({ data, period }: Props) {
+  const maxVal = Math.max(...data.map(d => d.input + d.output), 1);
+  const ticks = Array.from({ length: 5 }, (_, i) => Math.round((maxVal / 4) * i));
+
+  const needsAngle = period === "1m" || period === "1d";
 
   return (
-    <ResponsiveContainer width="100%" height={260}>
-      <AreaChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-        <defs>
-          <linearGradient id="gradInput" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#6366f1" stopOpacity={0.18} />
-            <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-          </linearGradient>
-          <linearGradient id="gradOutput" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#a855f7" stopOpacity={0.18} />
-            <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
-          </linearGradient>
-          <linearGradient id="gradCache" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.14} />
-            <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
+    <ResponsiveContainer width="100%" height={280}>
+      <LineChart data={data} margin={{ top: 4, right: 8, left: 4, bottom: needsAngle ? 16 : 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
         <XAxis
           dataKey="label"
-          tick={{ fontSize: 11, fill: "#8e8e93", fontFamily: "inherit" }}
+          interval={X_INTERVAL[period]}
+          tick={{
+            fontSize: 11,
+            fill: "var(--chart-tick)",
+            fontFamily: "inherit",
+            ...(needsAngle ? { angle: -35, textAnchor: "end", dy: 4 } : {}),
+          }}
           axisLine={false}
           tickLine={false}
-          interval="preserveStartEnd"
+          height={needsAngle ? 48 : 28}
         />
         <YAxis
           ticks={ticks}
           tickFormatter={formatK}
-          tick={{ fontSize: 11, fill: "#8e8e93", fontFamily: "inherit" }}
+          tick={{ fontSize: 11, fill: "var(--chart-tick)", fontFamily: "inherit" }}
           axisLine={false}
           tickLine={false}
+          width={56}
         />
         <Tooltip content={<CustomTooltip />} />
-        <Area
-          type="monotone"
+        <Legend content={<CustomLegend />} verticalAlign="top" />
+        <Line
+          type="linear"
           dataKey="input"
           name="Input"
           stroke="#6366f1"
           strokeWidth={2}
-          fill="url(#gradInput)"
           dot={false}
-          activeDot={{ r: 4, strokeWidth: 0 }}
+          activeDot={{ r: 4, strokeWidth: 0, fill: "#6366f1" }}
         />
-        <Area
-          type="monotone"
+        <Line
+          type="linear"
           dataKey="output"
           name="Output"
           stroke="#a855f7"
           strokeWidth={2}
-          fill="url(#gradOutput)"
           dot={false}
-          activeDot={{ r: 4, strokeWidth: 0 }}
+          activeDot={{ r: 4, strokeWidth: 0, fill: "#a855f7" }}
         />
-        <Area
-          type="monotone"
-          dataKey="cache"
-          name="Cache"
-          stroke="#06b6d4"
-          strokeWidth={2}
-          fill="url(#gradCache)"
-          dot={false}
-          activeDot={{ r: 4, strokeWidth: 0 }}
-        />
-      </AreaChart>
+      </LineChart>
     </ResponsiveContainer>
   );
 }

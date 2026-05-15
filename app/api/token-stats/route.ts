@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import type { DataPoint, RecentCall, Period } from "@/lib/mock-data";
+import type { DataPoint, Period } from "@/lib/mock-data";
 
 const PERIOD_MS: Record<Period, number> = {
   "1d": 86_400_000,
@@ -10,6 +10,19 @@ const PERIOD_MS: Record<Period, number> = {
   "1m": 2_592_000_000,
   "1y": 31_536_000_000,
 };
+
+const MODEL_LABEL: Record<string, string> = {
+  "claude-opus-4-7":           "Opus 4.7",
+  "claude-opus-4-5":           "Opus 4.5",
+  "claude-sonnet-4-6":         "Sonnet 4.6",
+  "claude-sonnet-4-5":         "Sonnet 4.5",
+  "claude-haiku-4-5":          "Haiku 4.5",
+  "claude-haiku-4-5-20251001": "Haiku 4.5",
+};
+
+function modelLabel(model: string) {
+  return MODEL_LABEL[model] ?? model;
+}
 
 function buildChartData(
   calls: { inputTokens: number; outputTokens: number; cacheTokens: number; timestamp: Date }[],
@@ -68,8 +81,14 @@ function buildChartData(
       buckets[idx].cache  += c.cacheTokens;
     }
   }
-
   return buckets;
+}
+
+function cleanProject(project: string | null): string {
+  if (!project) return "Unknown";
+  const prefix = "c--users-admin-desktop-";
+  if (project.toLowerCase().startsWith(prefix)) return project.slice(prefix.length);
+  return project;
 }
 
 export async function GET(request: NextRequest) {
@@ -78,27 +97,69 @@ export async function GET(request: NextRequest) {
   const now = Date.now();
   const since = new Date(now - PERIOD_MS[period]);
 
-  const rows = await prisma.call.findMany({
-    where: { timestamp: { gte: since } },
-    orderBy: { timestamp: "desc" },
-    select: {
-      id: true, model: true,
-      inputTokens: true, outputTokens: true, cacheTokens: true,
-      cost: true, timestamp: true,
-    },
-  });
+  const [rows, agg, rawSessions, rawModels] = await Promise.all([
+    prisma.call.findMany({
+      where: { timestamp: { gte: since } },
+      select: { inputTokens: true, outputTokens: true, cacheTokens: true, timestamp: true },
+    }),
+
+    prisma.call.aggregate({
+      where: { timestamp: { gte: since } },
+      _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
+      _count: { id: true },
+    }),
+
+    prisma.call.groupBy({
+      by: ["sessionId", "project"],
+      where: { timestamp: { gte: since } },
+      _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
+      _min: { timestamp: true },
+      _count: { id: true },
+      orderBy: [{ _min: { timestamp: "desc" } }],
+      take: 20,
+    }),
+
+    prisma.call.groupBy({
+      by: ["model"],
+      where: { timestamp: { gte: since } },
+      _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
+      _count: { id: true },
+      orderBy: [{ _sum: { inputTokens: "desc" } }],
+    }),
+  ]);
 
   const chartData = buildChartData(rows, period, now);
 
-  const calls: RecentCall[] = rows.map((r: typeof rows[number]) => ({
-    id:            r.id,
-    model:         r.model,
-    input_tokens:  r.inputTokens,
-    output_tokens: r.outputTokens,
-    cache_tokens:  r.cacheTokens,
-    cost:          r.cost,
-    timestamp:     r.timestamp.toLocaleString("vi-VN"),
+  const summary = {
+    totalInput:  agg._sum.inputTokens  ?? 0,
+    totalOutput: agg._sum.outputTokens ?? 0,
+    totalCache:  agg._sum.cacheTokens  ?? 0,
+    total: (agg._sum.inputTokens ?? 0) + (agg._sum.outputTokens ?? 0) + (agg._sum.cacheTokens ?? 0),
+    totalCost:   agg._sum.cost ?? 0,
+    callCount:   agg._count.id,
+  };
+
+  const sessionStats = rawSessions.map(s => ({
+    sessionId:   s.sessionId,
+    project:     cleanProject(s.project),
+    startTime:   s._min.timestamp?.toISOString() ?? "",
+    callCount:   s._count.id,
+    totalInput:  s._sum.inputTokens  ?? 0,
+    totalOutput: s._sum.outputTokens ?? 0,
+    totalCache:  s._sum.cacheTokens  ?? 0,
+    totalCost:   s._sum.cost         ?? 0,
   }));
 
-  return Response.json({ chartData, calls });
+  const modelStats = rawModels.map(m => ({
+    model:       m.model,
+    label:       modelLabel(m.model),
+    callCount:   m._count.id,
+    totalInput:  m._sum.inputTokens  ?? 0,
+    totalOutput: m._sum.outputTokens ?? 0,
+    totalCache:  m._sum.cacheTokens  ?? 0,
+    totalCost:   m._sum.cost         ?? 0,
+    totalTokens: (m._sum.inputTokens ?? 0) + (m._sum.outputTokens ?? 0),
+  }));
+
+  return Response.json({ chartData, summary, sessionStats, modelStats });
 }

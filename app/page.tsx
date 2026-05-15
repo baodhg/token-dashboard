@@ -1,276 +1,357 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import Link from "next/link";
+import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
-import { Settings, Zap, ArrowDownLeft, ArrowUpRight, Database, DollarSign, RefreshCw } from "lucide-react";
 import {
-  PERIODS,
-  calcSummary,
-  type Period,
-  type DataPoint,
-  type RecentCall,
-} from "@/lib/mock-data";
+  Zap, ArrowDownLeft, ArrowUpRight, DollarSign,
+  RefreshCw, Database, Clock, FolderOpen, Sun, Moon,
+} from "lucide-react";
+import { PERIODS, type Period, type DataPoint } from "@/lib/mock-data";
+import type { ModelStat } from "@/components/ModelChart";
 
-const TokenChart = dynamic(() => import("@/components/TokenChart"), { ssr: false });
+const TokenChart = dynamic<{ data: DataPoint[]; period: Period }>(
+  () => import("@/components/TokenChart"), { ssr: false }
+);
+const CacheChart = dynamic<{ data: DataPoint[]; period: Period }>(
+  () => import("@/components/CacheChart"), { ssr: false }
+);
+const ModelChart = dynamic<{ data: ModelStat[] }>(
+  () => import("@/components/ModelChart"), { ssr: false }
+);
+
+/* ─── helpers ─────────────────────────────────────────── */
 
 function formatK(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
 
-const MODEL_BADGE: Record<string, { label: string; color: string }> = {
-  "claude-opus-4-7":   { label: "Opus",   color: "bg-violet-100 text-violet-700" },
-  "claude-sonnet-4-6": { label: "Sonnet", color: "bg-indigo-100 text-indigo-700" },
-  "claude-haiku-4-5":  { label: "Haiku",  color: "bg-cyan-100 text-cyan-700" },
-  "claude-haiku-4-5-20251001": { label: "Haiku", color: "bg-cyan-100 text-cyan-700" },
+function fmtTime(iso: string) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("vi-VN", {
+    day: "2-digit", month: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
+/* ─── types ────────────────────────────────────────────── */
+
+interface Summary {
+  total: number; totalInput: number; totalOutput: number;
+  totalCache: number; totalCost: number; callCount: number;
+}
+interface SessionStat {
+  sessionId: string | null; project: string; startTime: string;
+  callCount: number; totalInput: number; totalOutput: number;
+  totalCache: number; totalCost: number;
+}
+interface ApiData {
+  chartData:    DataPoint[];
+  summary:      Summary;
+  sessionStats: SessionStat[];
+  modelStats:   ModelStat[];
+}
+
+const EMPTY_SUMMARY: Summary = {
+  total: 0, totalInput: 0, totalOutput: 0,
+  totalCache: 0, totalCost: 0, callCount: 0,
 };
 
-export default function DashboardPage() {
-  const [period, setPeriod] = useState<Period>("1w");
-  const [chartData, setChartData] = useState<DataPoint[]>([]);
-  const [calls, setCalls] = useState<RecentCall[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [lastSynced, setLastSynced] = useState<number | null>(null);
+/* ─── stat card ────────────────────────────────────────── */
 
-  const fetchStats = () => {
+function StatCard({
+  label, value, sub, icon: Icon, iconBg, iconColor, loading,
+}: {
+  label: string; value: string; sub: string;
+  icon: React.ElementType; iconBg: string; iconColor: string; loading: boolean;
+}) {
+  return (
+    <div className="bg-card rounded-2xl p-5 border border-border shadow-sm flex flex-col gap-3">
+      <div className={`w-9 h-9 rounded-xl ${iconBg} flex items-center justify-center`}>
+        <Icon className={`w-4 h-4 ${iconColor}`} />
+      </div>
+      <div>
+        <p className="text-[10px] font-semibold text-[#8e8e93] dark:text-[#98989d] uppercase tracking-widest mb-1">{label}</p>
+        <p className={`font-numeric text-[26px] font-bold text-foreground leading-none tracking-tight ${loading ? "opacity-30" : ""}`}>
+          {loading ? "···" : value}
+        </p>
+        <p className="text-[11px] text-[#aeaeb2] dark:text-[#6e6e72] mt-1.5">{sub}</p>
+      </div>
+    </div>
+  );
+}
+
+/* ─── section header ───────────────────────────────────── */
+
+function SectionHeader({ title, right }: { title: string; right?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <h2 className="font-semibold text-[14px] text-foreground tracking-tight">{title}</h2>
+      {right}
+    </div>
+  );
+}
+
+/* ─── page ─────────────────────────────────────────────── */
+
+export default function DashboardPage() {
+  const [period, setPeriod]     = useState<Period>("1w");
+  const [data, setData]         = useState<ApiData | null>(null);
+  const [loading, setLoading]   = useState(true);
+  const [syncing, setSyncing]   = useState(false);
+  const [lastSynced, setLastSynced] = useState<number | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    const isDark = document.documentElement.classList.contains("dark");
+    setTheme(isDark ? "dark" : "light");
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    document.documentElement.classList.toggle("dark", next === "dark");
+    try { localStorage.setItem("theme", next); } catch {}
+  };
+
+  const fetchStats = (p: Period) => {
     setLoading(true);
-    fetch(`/api/token-stats?period=${period}`)
+    fetch(`/api/token-stats?period=${p}`)
       .then(r => r.json())
-      .then(data => {
-        setChartData(data.chartData ?? []);
-        setCalls(data.calls ?? []);
-      })
-      .catch(() => { setChartData([]); setCalls([]); })
+      .then(setData)
+      .catch(() => setData(null))
       .finally(() => setLoading(false));
   };
 
   const handleSync = () => {
     setSyncing(true);
     fetch("/api/sync", { method: "POST" })
-      .then(r => r.json())
-      .then(() => { setLastSynced(Date.now()); fetchStats(); })
-      .catch(() => setSyncing(false))
+      .then(() => { setLastSynced(Date.now()); fetchStats(period); })
       .finally(() => setSyncing(false));
   };
 
-  useEffect(() => { fetchStats(); }, [period]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchStats(period); }, [period]);
 
-  const summary = useMemo(() => calcSummary(chartData), [chartData]);
+  const summary      = data?.summary      ?? EMPTY_SUMMARY;
+  const chartData    = data?.chartData    ?? [];
+  const sessionStats = data?.sessionStats ?? [];
+  const modelStats   = data?.modelStats   ?? [];
 
-  const stats = [
+  const pct = (n: number) =>
+    summary.total > 0 ? `${((n / summary.total) * 100).toFixed(0)}%` : "—";
+
+  const statCards = [
     {
       label: "Tổng tokens",
       value: formatK(summary.total),
-      sub: `${calls.length} lượt gọi`,
+      sub:   `${summary.callCount.toLocaleString()} lượt gọi`,
       icon: Zap,
-      iconBg: "bg-indigo-50",
-      iconColor: "text-indigo-600",
+      iconBg: "bg-indigo-50 dark:bg-indigo-500/15",
+      iconColor: "text-indigo-600 dark:text-indigo-400",
     },
     {
       label: "Input tokens",
       value: formatK(summary.totalInput),
-      sub: summary.total > 0 ? `${((summary.totalInput / summary.total) * 100).toFixed(0)}% tổng` : "—",
+      sub:   `${pct(summary.totalInput)} tổng`,
       icon: ArrowDownLeft,
-      iconBg: "bg-purple-50",
-      iconColor: "text-purple-600",
+      iconBg: "bg-purple-50 dark:bg-purple-500/15",
+      iconColor: "text-purple-600 dark:text-purple-400",
     },
     {
       label: "Output tokens",
       value: formatK(summary.totalOutput),
-      sub: summary.total > 0 ? `${((summary.totalOutput / summary.total) * 100).toFixed(0)}% tổng` : "—",
+      sub:   `${pct(summary.totalOutput)} tổng`,
       icon: ArrowUpRight,
-      iconBg: "bg-violet-50",
-      iconColor: "text-violet-600",
+      iconBg: "bg-violet-50 dark:bg-violet-500/15",
+      iconColor: "text-violet-600 dark:text-violet-400",
     },
     {
       label: "Chi phí ước tính",
-      value: `$${summary.cost.toFixed(4)}`,
-      sub: "Giá tham khảo",
+      value: `$${summary.totalCost.toFixed(4)}`,
+      sub:   "Giá tham khảo",
       icon: DollarSign,
-      iconBg: "bg-emerald-50",
-      iconColor: "text-emerald-600",
+      iconBg: "bg-emerald-50 dark:bg-emerald-500/15",
+      iconColor: "text-emerald-600 dark:text-emerald-400",
     },
   ];
 
+  const chartEmpty = chartData.every(d => d.input === 0 && d.output === 0);
+
   return (
-    <div className="min-h-screen bg-[#f2f2f7]">
-      {/* Header */}
-      <header className="bg-white border-b border-black/6 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+    <div className="min-h-screen bg-background">
+
+      {/* ── Header ── */}
+      <header className="bg-card border-b border-border sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between gap-4">
+
+          {/* Logo */}
+          <div className="flex items-center gap-2 shrink-0">
             <div className="w-7 h-7 rounded-lg bg-linear-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
               <Database className="w-3.5 h-3.5 text-white" />
             </div>
-            <span className="font-semibold text-[15px] text-[#1c1c1e]">Token Dashboard</span>
+            <span className="font-semibold text-[15px] text-foreground">Token Dashboard</span>
           </div>
-          <div className="flex items-center gap-2">
+
+          {/* Period pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+            {PERIODS.map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setPeriod(key)}
+                className={`shrink-0 px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-all cursor-pointer ${
+                  period === key
+                    ? "bg-foreground text-background shadow-sm"
+                    : "text-[#3c3c43] dark:text-[#c7c7cc] hover:bg-muted"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Right cluster: theme toggle + sync */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={toggleTheme}
+              aria-label="Toggle theme"
+              className="w-8 h-8 rounded-full bg-muted hover:bg-muted/70 flex items-center justify-center text-[#3c3c43] dark:text-[#c7c7cc] transition-colors cursor-pointer"
+            >
+              {theme === "dark"
+                ? <Sun className="w-3.5 h-3.5" />
+                : <Moon className="w-3.5 h-3.5" />}
+            </button>
+
             <button
               onClick={handleSync}
               disabled={syncing}
-              className="flex items-center gap-1.5 px-3 h-8 rounded-full bg-[#f2f2f7] hover:bg-[#e5e5ea] text-[12px] font-medium text-[#3c3c43] transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-3 h-8 rounded-full bg-muted hover:bg-muted/70 text-[12px] font-medium text-[#3c3c43] dark:text-[#c7c7cc] transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
-              {syncing ? "Đang sync…" : lastSynced ? `Sync lúc ${new Date(lastSynced).toLocaleTimeString("vi-VN")}` : "Sync"}
+              {syncing
+                ? "Đang sync…"
+                : lastSynced
+                  ? new Date(lastSynced).toLocaleTimeString("vi-VN")
+                  : "Sync"}
             </button>
-            <Link
-              href="/settings"
-              className="w-8 h-8 rounded-full bg-[#f2f2f7] hover:bg-[#e5e5ea] flex items-center justify-center transition-colors"
-            >
-              <Settings className="w-4 h-4 text-[#3c3c43]" />
-            </Link>
           </div>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-4">
-        {/* Period selector */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-          {PERIODS.map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setPeriod(key)}
-              className={`shrink-0 px-4 py-1.5 rounded-full text-[13px] font-medium transition-all cursor-pointer ${
-                period === key
-                  ? "bg-[#1c1c1e] text-white shadow-sm"
-                  : "bg-white text-[#3c3c43] border border-black/7 hover:border-black/15"
-              }`}
-            >
-              {label}
-            </button>
+      {/* ── Main ── */}
+      <main className="max-w-7xl mx-auto px-6 py-6 space-y-5">
+
+        {/* Row 1: Stat cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {statCards.map(s => (
+            <StatCard key={s.label} {...s} loading={loading} />
           ))}
         </div>
 
-        {/* Stats cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {stats.map((s) => (
-            <div key={s.label} className="bg-white rounded-2xl p-4 border border-black/5 shadow-sm">
-              <div className={`w-8 h-8 rounded-xl ${s.iconBg} flex items-center justify-center mb-3`}>
-                <s.icon className={`w-4 h-4 ${s.iconColor}`} />
-              </div>
-              <p className="text-[11px] font-semibold text-[#8e8e93] uppercase tracking-wide mb-1">{s.label}</p>
-              <p className={`font-numeric text-[22px] font-bold text-[#1c1c1e] leading-tight tracking-tight ${loading ? "opacity-40" : ""}`}>
-                {loading ? "···" : s.value}
-              </p>
-              <p className="text-[11px] text-[#aeaeb2] mt-1">{s.sub}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Chart */}
-        <div className="bg-white rounded-2xl p-5 border border-black/5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-[15px] text-[#1c1c1e]">Biểu đồ sử dụng</h2>
-            <div className="flex items-center gap-4">
-              {[
-                { color: "#6366f1", label: "Input" },
-                { color: "#a855f7", label: "Output" },
-                { color: "#06b6d4", label: "Cache read" },
-              ].map((l) => (
-                <span key={l.label} className="flex items-center gap-1.5 text-[11px] text-[#8e8e93]">
-                  <span className="w-2 h-2 rounded-full" style={{ background: l.color }} />
-                  {l.label}
-                </span>
-              ))}
-            </div>
-          </div>
+        {/* Row 2: Input / Output line chart */}
+        <div className="bg-card rounded-2xl p-5 border border-border shadow-sm">
+          <SectionHeader title="Input / Output" />
           {loading ? (
-            <div className="h-65 flex items-center justify-center text-[#aeaeb2] text-sm">
-              Đang tải dữ liệu…
-            </div>
-          ) : chartData.every(d => d.input === 0 && d.output === 0) ? (
-            <div className="h-65 flex items-center justify-center text-[#aeaeb2] text-sm">
-              Không có dữ liệu trong khoảng thời gian này
-            </div>
+            <div className="h-64 flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Đang tải…</div>
+          ) : chartEmpty ? (
+            <div className="h-64 flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Không có dữ liệu</div>
           ) : (
-            <TokenChart data={chartData} />
+            <TokenChart data={chartData} period={period} />
           )}
         </div>
 
-        {/* Recent calls */}
-        <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-black/5 flex items-center justify-between">
-            <h2 className="font-semibold text-[15px] text-[#1c1c1e]">Lịch sử gọi API</h2>
-            <span className="text-[12px] text-[#aeaeb2]">{calls.length} bản ghi</span>
+        {/* Row 3: Cache read bar chart + Tokens theo model */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+          <div className="lg:col-span-3 bg-card rounded-2xl p-5 border border-border shadow-sm">
+            <SectionHeader title="Cache read" />
+            <div className="h-52">
+              {loading ? (
+                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Đang tải…</div>
+              ) : chartEmpty ? (
+                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Không có dữ liệu</div>
+              ) : (
+                <CacheChart data={chartData} period={period} />
+              )}
+            </div>
           </div>
 
-          {calls.length === 0 && !loading ? (
-            <div className="px-5 py-10 text-center text-[13px] text-[#aeaeb2]">
-              Không có lịch sử trong khoảng này
+          <div className="lg:col-span-2 bg-card rounded-2xl p-5 border border-border shadow-sm">
+            <SectionHeader title="Tokens theo model" />
+            <div className="h-52">
+              {loading ? (
+                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Đang tải…</div>
+              ) : (
+                <ModelChart data={modelStats} />
+              )}
             </div>
-          ) : (
-            <>
-              {/* Desktop table */}
-              <div className="hidden sm:block overflow-x-auto">
-                <table className="w-full text-[13px]">
-                  <thead>
-                    <tr className="border-b border-black/4">
-                      {["Model", "Input", "Output", "Cache read", "Chi phí", "Thời gian"].map((h) => (
-                        <th
-                          key={h}
-                          className="text-left px-5 py-2.5 text-[11px] font-semibold text-[#aeaeb2] uppercase tracking-wide"
-                        >
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {calls.slice(0, 15).map((c, i) => {
-                      const badge = MODEL_BADGE[c.model] ?? { label: c.model, color: "bg-gray-100 text-gray-600" };
-                      return (
-                        <tr
-                          key={c.id}
-                          className={`hover:bg-[#f9f9fb] transition-colors ${
-                            i < Math.min(calls.length, 15) - 1 ? "border-b border-black/3" : ""
-                          }`}
-                        >
-                          <td className="px-5 py-3">
-                            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${badge.color}`}>
-                              {badge.label}
-                            </span>
-                          </td>
-                          <td className="font-numeric px-5 py-3 font-medium text-[#1c1c1e]">{c.input_tokens.toLocaleString()}</td>
-                          <td className="font-numeric px-5 py-3 text-[#3c3c43]">{c.output_tokens.toLocaleString()}</td>
-                          <td className="font-numeric px-5 py-3 text-[#8e8e93]">{c.cache_tokens.toLocaleString()}</td>
-                          <td className="font-numeric px-5 py-3 text-emerald-600 font-semibold">${c.cost.toFixed(5)}</td>
-                          <td className="px-5 py-3 text-[#aeaeb2]">{c.timestamp}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+          </div>
+        </div>
 
-              {/* Mobile list */}
-              <div className="sm:hidden divide-y divide-black/4">
-                {calls.slice(0, 12).map((c) => {
-                  const badge = MODEL_BADGE[c.model] ?? { label: c.model, color: "bg-gray-100 text-gray-600" };
-                  return (
-                    <div key={c.id} className="px-4 py-3 flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${badge.color}`}>
-                            {badge.label}
-                          </span>
-                          <span className="text-[11px] text-[#aeaeb2] truncate">{c.timestamp}</span>
-                        </div>
-                        <p className="font-numeric text-[12px] text-[#3c3c43]">
-                          ↓ {c.input_tokens.toLocaleString()} · ↑ {c.output_tokens.toLocaleString()}
-                        </p>
-                      </div>
-                      <span className="font-numeric text-[13px] font-semibold text-emerald-600 shrink-0">
-                        ${c.cost.toFixed(5)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
+        {/* Row 4: Sessions table */}
+        <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-border">
+            <SectionHeader
+              title="Sessions gần nhất"
+              right={<span className="text-[11px] text-[#aeaeb2] dark:text-[#6e6e72]">{sessionStats.length} sessions</span>}
+            />
+          </div>
+
+          {sessionStats.length === 0 && !loading ? (
+            <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">Không có dữ liệu</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px]">
+                <thead>
+                  <tr className="border-b border-border">
+                    {[
+                      { label: "Dự án",   icon: FolderOpen },
+                      { label: "Bắt đầu", icon: Clock      },
+                      { label: "Calls",   icon: null       },
+                      { label: "Tokens",  icon: null       },
+                      { label: "Chi phí", icon: null       },
+                    ].map(({ label, icon: Icon }) => (
+                      <th key={label} className="text-left px-4 py-2.5 text-[10px] font-semibold text-[#aeaeb2] dark:text-[#6e6e72] uppercase tracking-wide whitespace-nowrap">
+                        <span className="flex items-center gap-1">
+                          {Icon && <Icon className="w-3 h-3" />}
+                          {label}
+                        </span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessionStats.map((s, i) => (
+                    <tr
+                      key={s.sessionId ?? i}
+                      className={`hover:bg-muted/50 transition-colors ${
+                        i < sessionStats.length - 1 ? "border-b border-border" : ""
+                      }`}
+                    >
+                      <td className="px-4 py-2.5 max-w-35">
+                        <span className="block truncate font-medium text-foreground" title={s.project}>
+                          {s.project}
+                        </span>
+                      </td>
+                      <td className="font-numeric px-4 py-2.5 text-[#8e8e93] dark:text-[#98989d] whitespace-nowrap">
+                        {fmtTime(s.startTime)}
+                      </td>
+                      <td className="font-numeric px-4 py-2.5 text-[#3c3c43] dark:text-[#c7c7cc]">
+                        {s.callCount.toLocaleString()}
+                      </td>
+                      <td className="font-numeric px-4 py-2.5 text-foreground font-medium">
+                        {formatK(s.totalInput + s.totalOutput)}
+                      </td>
+                      <td className="font-numeric px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                        ${s.totalCost.toFixed(4)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
+
       </main>
     </div>
   );

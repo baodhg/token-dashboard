@@ -18,6 +18,16 @@ export const metadata: Metadata = {
   description: "Claude API token usage dashboard",
 };
 
+const setInitialTheme = `
+(function() {
+  try {
+    var t = localStorage.getItem('theme');
+    if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    if (t === 'dark') document.documentElement.classList.add('dark');
+  } catch (e) {}
+})();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -25,7 +35,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="vi" className={`${geistMono.variable} ${spaceGrotesk.variable} h-full antialiased`}>
-      <body className="min-h-full bg-[#f2f2f7] text-[#1c1c1e]">{children}</body>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: setInitialTheme }} />
+      </head>
+      <body className="min-h-full bg-background text-foreground">{children}</body>
     </html>
   );
 }

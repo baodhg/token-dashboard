@@ -34,6 +34,31 @@
   --primary: #1c1c1e;
   --primary-foreground: #ffffff;
   --radius: 0.875rem;
+
+  /* chart palette */
+  --chart-grid: rgba(0, 0, 0, 0.05);
+  --chart-tick: #8e8e93;
+  --chart-tick-strong: #3c3c43;
+  --chart-tooltip-bg: #ffffff;
+  --chart-tooltip-border: rgba(0, 0, 0, 0.05);
+}
+
+.dark {
+  --background: #0a0a0c;
+  --foreground: #f2f2f7;
+  --card: #1c1c1e;
+  --card-foreground: #f2f2f7;
+  --muted: #2c2c2e;
+  --muted-foreground: #98989d;
+  --border: rgba(255, 255, 255, 0.08);
+  --primary: #ffffff;
+  --primary-foreground: #1c1c1e;
+
+  --chart-grid: rgba(255, 255, 255, 0.08);
+  --chart-tick: #98989d;
+  --chart-tick-strong: #d1d1d6;
+  --chart-tooltip-bg: #1c1c1e;
+  --chart-tooltip-border: rgba(255, 255, 255, 0.08);
 }
 
 @layer base {
