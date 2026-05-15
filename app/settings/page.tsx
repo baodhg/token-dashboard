@@ -1,0 +1,191 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { ChevronLeft, Check, ChevronRight } from "lucide-react";
+
+type Theme = "light" | "dark" | "system";
+type Lang = "vi" | "en" | "ja" | "ko";
+
+const THEMES: { key: Theme; label: string }[] = [
+  { key: "light",  label: "Light" },
+  { key: "dark",   label: "Dark" },
+  { key: "system", label: "System" },
+];
+
+const LANGUAGES: { key: Lang; label: string; native: string }[] = [
+  { key: "vi", label: "Tiếng Việt", native: "Tiếng Việt" },
+  { key: "en", label: "English",    native: "English" },
+  { key: "ja", label: "Japanese",   native: "日本語" },
+  { key: "ko", label: "Korean",     native: "한국어" },
+];
+
+function ThemeCard({ theme, selected, onSelect }: { theme: Theme; selected: boolean; onSelect: () => void }) {
+  return (
+    <button
+      onClick={onSelect}
+      className="flex flex-col items-center gap-2 cursor-pointer group"
+    >
+      {/* Card preview */}
+      <div
+        className={`relative w-full aspect-[4/3] rounded-2xl overflow-hidden border-2 transition-all ${
+          selected
+            ? "border-[#1c1c1e] shadow-[0_0_0_4px_rgba(28,28,30,0.08)]"
+            : "border-black/[0.08] hover:border-black/[0.18]"
+        }`}
+      >
+        {theme === "light" && (
+          <div className="w-full h-full bg-[#f2f2f7] flex items-center justify-center">
+            <div className="bg-white rounded-xl px-4 py-2.5 shadow-sm border border-black/[0.06]">
+              <span className="text-[22px] font-semibold text-[#1c1c1e]">Aa</span>
+            </div>
+          </div>
+        )}
+
+        {theme === "dark" && (
+          <div className="w-full h-full bg-[#1c1c1e] flex items-center justify-center">
+            <div className="bg-[#2c2c2e] rounded-xl px-4 py-2.5 border border-white/[0.08]">
+              <span className="text-[22px] font-semibold text-white">Aa</span>
+            </div>
+          </div>
+        )}
+
+        {theme === "system" && (
+          <div className="w-full h-full flex overflow-hidden">
+            {/* Left half – light */}
+            <div className="w-1/2 h-full bg-[#f2f2f7] flex items-center justify-end pr-1">
+              <div className="bg-white rounded-l-xl pl-3 pr-1 py-2.5 shadow-sm border-l border-y border-black/[0.06]">
+                <span className="text-[20px] font-semibold text-[#1c1c1e]">Aa</span>
+              </div>
+            </div>
+            {/* Right half – dark */}
+            <div className="w-1/2 h-full bg-[#1c1c1e] flex items-center justify-start pl-1">
+              <div className="bg-[#2c2c2e] rounded-r-xl pr-3 pl-1 py-2.5 border-r border-y border-white/[0.08]">
+                <span className="text-[20px] font-semibold text-white">Aa</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Checkmark badge */}
+        {selected && (
+          <div className="absolute bottom-2 right-2 w-6 h-6 bg-[#1c1c1e] rounded-full flex items-center justify-center shadow-sm">
+            <Check className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
+          </div>
+        )}
+      </div>
+
+      {/* Label */}
+      <span className={`text-[14px] font-medium ${selected ? "text-[#1c1c1e]" : "text-[#3c3c43]"}`}>
+        {theme === "light" ? "Light" : theme === "dark" ? "Dark" : "System"}
+      </span>
+    </button>
+  );
+}
+
+export default function SettingsPage() {
+  const [theme, setTheme] = useState<Theme>("system");
+  const [lang, setLang]   = useState<Lang>("vi");
+
+  return (
+    <div className="min-h-screen bg-[#f2f2f7] flex items-start justify-center py-8 px-4">
+      <div className="w-full max-w-sm bg-white rounded-[28px] overflow-hidden shadow-[0_8px_40px_rgba(0,0,0,0.10)]">
+
+        {/* Header */}
+        <div className="relative flex items-center justify-center h-14 px-4 border-b border-black/[0.06]">
+          <Link
+            href="/"
+            className="absolute left-4 w-8 h-8 rounded-full bg-[#f2f2f7] hover:bg-[#e5e5ea] flex items-center justify-center transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4 text-[#3c3c43]" />
+          </Link>
+          <h1 className="text-[17px] font-semibold text-[#1c1c1e]">App settings</h1>
+        </div>
+
+        <div className="px-5 py-6 space-y-7">
+          {/* APPEARANCE */}
+          <section>
+            <p className="text-[11px] font-semibold text-[#aeaeb2] tracking-widest uppercase mb-4">
+              Appearance
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              {THEMES.map((t) => (
+                <ThemeCard
+                  key={t.key}
+                  theme={t.key}
+                  selected={theme === t.key}
+                  onSelect={() => setTheme(t.key)}
+                />
+              ))}
+            </div>
+          </section>
+
+          {/* Divider */}
+          <div className="h-px bg-black/[0.06]" />
+
+          {/* LANGUAGE */}
+          <section>
+            <p className="text-[11px] font-semibold text-[#aeaeb2] tracking-widest uppercase mb-3">
+              Language
+            </p>
+            <div className="space-y-1">
+              {LANGUAGES.map((l) => (
+                <button
+                  key={l.key}
+                  onClick={() => setLang(l.key)}
+                  className="w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-colors cursor-pointer hover:bg-[#f2f2f7]"
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
+                        lang === l.key
+                          ? "border-[#1c1c1e] bg-[#1c1c1e]"
+                          : "border-[#c7c7cc]"
+                      }`}
+                    >
+                      {lang === l.key && (
+                        <div className="w-2 h-2 rounded-full bg-white" />
+                      )}
+                    </div>
+                    <span className="text-[15px] font-medium text-[#1c1c1e]">{l.native}</span>
+                  </div>
+                  {lang === l.key && (
+                    <Check className="w-4 h-4 text-[#1c1c1e]" strokeWidth={2.5} />
+                  )}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* Divider */}
+          <div className="h-px bg-black/[0.06]" />
+
+          {/* MORE OPTIONS */}
+          <section>
+            <p className="text-[11px] font-semibold text-[#aeaeb2] tracking-widest uppercase mb-3">
+              Thêm tuỳ chọn
+            </p>
+            <div className="space-y-1">
+              {[
+                { label: "API Keys",        sub: "Quản lý khóa truy cập" },
+                { label: "Thông báo",        sub: "Email & push notifications" },
+                { label: "Giới hạn token",   sub: "Cảnh báo khi vượt ngưỡng" },
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  className="w-full flex items-center justify-between px-4 py-3 rounded-2xl hover:bg-[#f2f2f7] transition-colors cursor-pointer group"
+                >
+                  <div className="text-left">
+                    <p className="text-[15px] font-medium text-[#1c1c1e]">{item.label}</p>
+                    <p className="text-[12px] text-[#aeaeb2] mt-0.5">{item.sub}</p>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-[#c7c7cc] group-hover:text-[#8e8e93] transition-colors" />
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
