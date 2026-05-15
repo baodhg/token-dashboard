@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { Settings, Zap, ArrowDownLeft, ArrowUpRight, Database, DollarSign } from "lucide-react";
+import { Settings, Zap, ArrowDownLeft, ArrowUpRight, Database, DollarSign, RefreshCw } from "lucide-react";
 import {
   PERIODS,
   calcSummary,
@@ -32,8 +32,10 @@ export default function DashboardPage() {
   const [chartData, setChartData] = useState<DataPoint[]>([]);
   const [calls, setCalls] = useState<RecentCall[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSynced, setLastSynced] = useState<number | null>(null);
 
-  useEffect(() => {
+  const fetchStats = () => {
     setLoading(true);
     fetch(`/api/token-stats?period=${period}`)
       .then(r => r.json())
@@ -41,12 +43,20 @@ export default function DashboardPage() {
         setChartData(data.chartData ?? []);
         setCalls(data.calls ?? []);
       })
-      .catch(() => {
-        setChartData([]);
-        setCalls([]);
-      })
+      .catch(() => { setChartData([]); setCalls([]); })
       .finally(() => setLoading(false));
-  }, [period]);
+  };
+
+  const handleSync = () => {
+    setSyncing(true);
+    fetch("/api/sync", { method: "POST" })
+      .then(r => r.json())
+      .then(() => { setLastSynced(Date.now()); fetchStats(); })
+      .catch(() => setSyncing(false))
+      .finally(() => setSyncing(false));
+  };
+
+  useEffect(() => { fetchStats(); }, [period]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const summary = useMemo(() => calcSummary(chartData), [chartData]);
 
@@ -96,12 +106,22 @@ export default function DashboardPage() {
             </div>
             <span className="font-semibold text-[15px] text-[#1c1c1e]">Token Dashboard</span>
           </div>
-          <Link
-            href="/settings"
-            className="w-8 h-8 rounded-full bg-[#f2f2f7] hover:bg-[#e5e5ea] flex items-center justify-center transition-colors"
-          >
-            <Settings className="w-4 h-4 text-[#3c3c43]" />
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="flex items-center gap-1.5 px-3 h-8 rounded-full bg-[#f2f2f7] hover:bg-[#e5e5ea] text-[12px] font-medium text-[#3c3c43] transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "Đang sync…" : lastSynced ? `Sync lúc ${new Date(lastSynced).toLocaleTimeString("vi-VN")}` : "Sync"}
+            </button>
+            <Link
+              href="/settings"
+              className="w-8 h-8 rounded-full bg-[#f2f2f7] hover:bg-[#e5e5ea] flex items-center justify-center transition-colors"
+            >
+              <Settings className="w-4 h-4 text-[#3c3c43]" />
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -131,7 +151,7 @@ export default function DashboardPage() {
                 <s.icon className={`w-4 h-4 ${s.iconColor}`} />
               </div>
               <p className="text-[11px] font-semibold text-[#8e8e93] uppercase tracking-wide mb-1">{s.label}</p>
-              <p className={`text-[22px] font-bold text-[#1c1c1e] leading-tight tracking-tight ${loading ? "opacity-40" : ""}`}>
+              <p className={`font-numeric text-[22px] font-bold text-[#1c1c1e] leading-tight tracking-tight ${loading ? "opacity-40" : ""}`}>
                 {loading ? "···" : s.value}
               </p>
               <p className="text-[11px] text-[#aeaeb2] mt-1">{s.sub}</p>
@@ -212,10 +232,10 @@ export default function DashboardPage() {
                               {badge.label}
                             </span>
                           </td>
-                          <td className="px-5 py-3 font-medium text-[#1c1c1e]">{c.input_tokens.toLocaleString()}</td>
-                          <td className="px-5 py-3 text-[#3c3c43]">{c.output_tokens.toLocaleString()}</td>
-                          <td className="px-5 py-3 text-[#8e8e93]">{c.cache_tokens.toLocaleString()}</td>
-                          <td className="px-5 py-3 text-emerald-600 font-semibold">${c.cost.toFixed(5)}</td>
+                          <td className="font-numeric px-5 py-3 font-medium text-[#1c1c1e]">{c.input_tokens.toLocaleString()}</td>
+                          <td className="font-numeric px-5 py-3 text-[#3c3c43]">{c.output_tokens.toLocaleString()}</td>
+                          <td className="font-numeric px-5 py-3 text-[#8e8e93]">{c.cache_tokens.toLocaleString()}</td>
+                          <td className="font-numeric px-5 py-3 text-emerald-600 font-semibold">${c.cost.toFixed(5)}</td>
                           <td className="px-5 py-3 text-[#aeaeb2]">{c.timestamp}</td>
                         </tr>
                       );
@@ -237,11 +257,11 @@ export default function DashboardPage() {
                           </span>
                           <span className="text-[11px] text-[#aeaeb2] truncate">{c.timestamp}</span>
                         </div>
-                        <p className="text-[12px] text-[#3c3c43]">
+                        <p className="font-numeric text-[12px] text-[#3c3c43]">
                           ↓ {c.input_tokens.toLocaleString()} · ↑ {c.output_tokens.toLocaleString()}
                         </p>
                       </div>
-                      <span className="text-[13px] font-semibold text-emerald-600 shrink-0">
+                      <span className="font-numeric text-[13px] font-semibold text-emerald-600 shrink-0">
                         ${c.cost.toFixed(5)}
                       </span>
                     </div>
