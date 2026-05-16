@@ -24,23 +24,26 @@ function formatK(n: number) {
   return String(n);
 }
 
-const MODEL_COLORS: Record<string, string> = {
-  "Opus 4.7":        "#7c3aed",
-  "Opus 4.6":        "#8b5cf6",
-  "Opus 4.5":        "#6d28d9",
-  "Sonnet 4.6":      "#4f46e5",
-  "Sonnet 4.5":      "#4338ca",
-  "Haiku 4.5":       "#0891b2",
-  "Flash 3 Preview": "#22d3ee",
-  "Pro 3.1 Preview": "#06b6d4",
-  "Pro 2.5":         "#0891b2",
-  "OpenAI Codex":    "#f59e0b",
-  "GPT-5.3 Codex":   "#fbbf24",
-  "Codex":           "#d97706",
+const PLATFORM_COLORS: Record<string, string> = {
+  "claude": "124, 58, 237", // Purple for Claude
+  "gemini": "34, 211, 238",  // Cyan for Gemini
+  "codex":  "245, 158, 11",   // Amber for Codex
 };
 
-function barColor(label: string) {
-  return MODEL_COLORS[label] ?? "#6366f1";
+function getPlatform(label: string) {
+  if (label.includes("Opus") || label.includes("Sonnet") || label.includes("Haiku")) return "claude";
+  if (label.includes("Gemini") || label.includes("Preview") || label.includes("Pro")) return "gemini";
+  if (label.includes("Codex")) return "codex";
+  return "claude"; // Default
+}
+
+function calculateBarColor(platform: string, pct: number, isMax: boolean) {
+  const rgb = PLATFORM_COLORS[platform] ?? "99, 102, 241"; // Default Indigo
+  if (isMax) return `rgb(${rgb})`;
+  
+  // Scale opacity based on pct, min 0.3, max 0.85
+  const opacity = 0.3 + (pct / 100) * 0.55;
+  return `rgba(${rgb}, ${opacity.toFixed(2)})`;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,15 +81,25 @@ export default function ModelChart({ data }: Props) {
   }
 
   const total = data.reduce((s, d) => s + d.totalTokens, 0);
-  const dataWithPct = data.map(d => ({
+  
+  // Group by platform to find max per platform for color scaling
+  const platformMaxes: Record<string, number> = {};
+  const dataWithPctAndColor = data.map(d => {
+    const pct = total > 0 ? Math.round((d.totalTokens / total) * 100) : 0;
+    const platform = getPlatform(d.label);
+    if (!platformMaxes[platform] || d.totalTokens > platformMaxes[platform]) {
+      platformMaxes[platform] = d.totalTokens;
+    }
+    return { ...d, pct, platform };
+  }).map(d => ({
     ...d,
-    pct: total > 0 ? Math.round((d.totalTokens / total) * 100) : 0,
+    fillColor: calculateBarColor(d.platform, (d.totalTokens / platformMaxes[d.platform]) * 100, d.totalTokens === platformMaxes[d.platform])
   }));
 
   return (
     <ResponsiveContainer width="100%" height={208}>
       <BarChart
-        data={dataWithPct}
+        data={dataWithPctAndColor}
         layout="vertical"
         margin={{ top: 0, right: 40, left: 4, bottom: 0 }}
         barSize={18}
@@ -109,8 +122,8 @@ export default function ModelChart({ data }: Props) {
         />
         <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--chart-grid)" }} />
         <Bar dataKey="totalTokens" name="Tokens" radius={[0, 4, 4, 0]}>
-          {data.map((entry) => (
-            <Cell key={entry.model} fill={barColor(entry.label)} />
+          {dataWithPctAndColor.map((entry) => (
+            <Cell key={entry.model} fill={entry.fillColor} />
           ))}
           <LabelList
             dataKey="pct"

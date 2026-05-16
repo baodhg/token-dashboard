@@ -117,17 +117,29 @@ function SectionHeader({ title, right }: { title: string; right?: React.ReactNod
   );
 }
 
+import Image from "next/image";
+
 /* ─── platform badge ───────────────────────────────────── */
 
 function SourceBadge({ source }: { source: string }) {
   const color = SOURCE_COLORS[source] ?? "#8e8e93";
   const label = source === "claude_code" ? "Claude" : source === "cline" ? "Cline" : source === "codex" ? "Codex" : source === "gemini" ? "Gemini" : source;
+  
+  let iconSrc = null;
+  if (source === "gemini") iconSrc = "/gemini.svg";
+  else if (source === "claude_code" || source === "cline") iconSrc = "/claude.svg";
+  else if (source === "codex") iconSrc = "/codex.svg";
+
   return (
     <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
-      style={{ background: `${color}18`, color }}
+      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border"
+      style={{ background: `${color}10`, color, borderColor: `${color}30` }}
     >
-      <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+      {iconSrc ? (
+        <Image src={iconSrc} alt={label} width={10} height={10} style={{ color }} className="opacity-90" />
+      ) : (
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+      )}
       {label}
     </span>
   );
