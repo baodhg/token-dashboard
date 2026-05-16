@@ -136,13 +136,13 @@ function cleanProject(project: string | null, source: string): string {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const period = (searchParams.get("period") ?? "5d") as Period;
+  const period = (searchParams.get("period") ?? "1d") as Period;
   const sourceFilter = searchParams.get("source") ?? "all";
   const fromParam = searchParams.get("from");
   const toParam = searchParams.get("to");
 
   const now = Date.now();
-  let since = new Date(now - (PERIOD_MS[period as Exclude<Period, "custom">] ?? PERIOD_MS["5d"]));
+  let since = new Date(now - (PERIOD_MS[period as Exclude<Period, "custom">] ?? PERIOD_MS["1d"]));
   let toDate = new Date(now);
 
   if (period === "custom" && fromParam && toParam) {

@@ -173,7 +173,7 @@ function PlatformCards({ platforms, total, loading }: {
 /* ─── page ─────────────────────────────────────────────── */
 
 export default function DashboardPage() {
-  const [period, setPeriod]       = useState<Period>("5d");
+  const [period, setPeriod]       = useState<Period>("1d");
   const [source, setSource]       = useState<Source>("all");
   const [data, setData]           = useState<ApiData | null>(null);
   const [loading, setLoading]     = useState(true);
