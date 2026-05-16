@@ -127,7 +127,8 @@ function SourceBadge({ source }: { source: string }) {
   
   let iconSrc = null;
   if (source === "gemini") iconSrc = "/gemini.svg";
-  else if (source === "claude_code" || source === "cline") iconSrc = "/claude.svg";
+  else if (source === "claude_code") iconSrc = "/claude.svg";
+  else if (source === "cline") iconSrc = "/cline.svg";
   else if (source === "codex") iconSrc = "/codex.svg";
 
   return (
