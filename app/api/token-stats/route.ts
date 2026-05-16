@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import type { DataPoint, Period } from "@/lib/mock-data";
 
-const PERIOD_MS: Record<Period, number> = {
+const PERIOD_MS: Record<Exclude<Period, "custom">, number> = {
   "1d": 86_400_000,
   "3d": 259_200_000,
   "5d": 432_000_000,
@@ -34,7 +34,9 @@ function modelLabel(model: string) {
 function buildChartData(
   calls: { inputTokens: number; outputTokens: number; cacheTokens: number; timestamp: Date }[],
   period: Period,
-  now: number
+  now: number,
+  customSince?: number,
+  customTo?: number
 ): DataPoint[] {
   const DAYS_VI   = ["CN","T2","T3","T4","T5","T6","T7"];
   const MONTHS_VI = ["Th1","Th2","Th3","Th4","Th5","Th6","Th7","Th8","Th9","Th10","Th11","Th12"];
@@ -42,40 +44,74 @@ function buildChartData(
 
   type Cfg = { count: number; labelFn: (i: number) => string; bucketFn: (ts: Date) => number };
 
-  const configs: Record<Period, Cfg> = {
-    "1d": {
-      count: 24,
-      labelFn: (i) => `${String(i).padStart(2, "0")}:00`,
-      bucketFn: (ts) => ts.getHours(),
-    },
-    "3d": {
-      count: 12,
-      labelFn: (i) => `N${Math.floor(i / 4) + 1} ${String((i % 4) * 6).padStart(2, "0")}h`,
-      bucketFn: (ts) => Math.max(0, 11 - Math.floor((now - ts.getTime()) / 3_600_000 / 6)),
-    },
-    "5d": {
-      count: 5,
-      labelFn: (i) => { const d = new Date(todayMidnight - (4 - i) * 86_400_000); return `${d.getDate()}/${d.getMonth() + 1}`; },
-      bucketFn: (ts) => Math.max(0, 4 - Math.floor((todayMidnight - new Date(ts.getFullYear(), ts.getMonth(), ts.getDate()).getTime()) / 86_400_000)),
-    },
-    "1w": {
-      count: 7,
-      labelFn: (i) => { const d = new Date(todayMidnight - (6 - i) * 86_400_000); return DAYS_VI[d.getDay()]; },
-      bucketFn: (ts) => Math.max(0, 6 - Math.floor((todayMidnight - new Date(ts.getFullYear(), ts.getMonth(), ts.getDate()).getTime()) / 86_400_000)),
-    },
-    "1m": {
-      count: 30,
-      labelFn: (i) => { const d = new Date(todayMidnight - (29 - i) * 86_400_000); return `${d.getDate()}/${d.getMonth() + 1}`; },
-      bucketFn: (ts) => Math.max(0, 29 - Math.floor((todayMidnight - new Date(ts.getFullYear(), ts.getMonth(), ts.getDate()).getTime()) / 86_400_000)),
-    },
-    "1y": {
-      count: 12,
-      labelFn: (i) => MONTHS_VI[i],
-      bucketFn: (ts) => ts.getMonth(),
-    },
-  };
+  let config: Cfg;
 
-  const { count, labelFn, bucketFn } = configs[period];
+  if (period === "custom" && customSince && customTo) {
+    const startMidnight = new Date(new Date(customSince).setHours(0, 0, 0, 0)).getTime();
+    const endMidnight = new Date(new Date(customTo).setHours(0, 0, 0, 0)).getTime();
+    const diffDays = Math.max(1, Math.round((endMidnight - startMidnight) / 86_400_000) + 1);
+    
+    if (diffDays <= 1) {
+       config = {
+         count: 24,
+         labelFn: (i) => `${String(i).padStart(2, "0")}:00`,
+         bucketFn: (ts) => ts.getHours(),
+       };
+    } else if (diffDays <= 31) {
+       config = {
+         count: diffDays,
+         labelFn: (i) => { const d = new Date(startMidnight + i * 86_400_000); return `${d.getDate()}/${d.getMonth() + 1}`; },
+         bucketFn: (ts) => Math.floor((ts.getTime() - startMidnight) / 86_400_000),
+       };
+    } else {
+       const diffMonths = (new Date(customTo).getFullYear() - new Date(customSince).getFullYear()) * 12 + new Date(customTo).getMonth() - new Date(customSince).getMonth() + 1;
+       config = {
+         count: diffMonths,
+         labelFn: (i) => {
+            const d = new Date(customSince);
+            d.setMonth(d.getMonth() + i);
+            return `${MONTHS_VI[d.getMonth()]} ${d.getFullYear()}`;
+         },
+         bucketFn: (ts) => (ts.getFullYear() - new Date(customSince).getFullYear()) * 12 + ts.getMonth() - new Date(customSince).getMonth(),
+       };
+    }
+  } else {
+    const configs: Record<Exclude<Period, "custom">, Cfg> = {
+      "1d": {
+        count: 24,
+        labelFn: (i) => `${String(i).padStart(2, "0")}:00`,
+        bucketFn: (ts) => ts.getHours(),
+      },
+      "3d": {
+        count: 12,
+        labelFn: (i) => `N${Math.floor(i / 4) + 1} ${String((i % 4) * 6).padStart(2, "0")}h`,
+        bucketFn: (ts) => Math.max(0, 11 - Math.floor((now - ts.getTime()) / 3_600_000 / 6)),
+      },
+      "5d": {
+        count: 5,
+        labelFn: (i) => { const d = new Date(todayMidnight - (4 - i) * 86_400_000); return `${d.getDate()}/${d.getMonth() + 1}`; },
+        bucketFn: (ts) => Math.max(0, 4 - Math.floor((todayMidnight - new Date(ts.getFullYear(), ts.getMonth(), ts.getDate()).getTime()) / 86_400_000)),
+      },
+      "1w": {
+        count: 7,
+        labelFn: (i) => { const d = new Date(todayMidnight - (6 - i) * 86_400_000); return DAYS_VI[d.getDay()]; },
+        bucketFn: (ts) => Math.max(0, 6 - Math.floor((todayMidnight - new Date(ts.getFullYear(), ts.getMonth(), ts.getDate()).getTime()) / 86_400_000)),
+      },
+      "1m": {
+        count: 30,
+        labelFn: (i) => { const d = new Date(todayMidnight - (29 - i) * 86_400_000); return `${d.getDate()}/${d.getMonth() + 1}`; },
+        bucketFn: (ts) => Math.max(0, 29 - Math.floor((todayMidnight - new Date(ts.getFullYear(), ts.getMonth(), ts.getDate()).getTime()) / 86_400_000)),
+      },
+      "1y": {
+        count: 12,
+        labelFn: (i) => MONTHS_VI[i],
+        bucketFn: (ts) => ts.getMonth(),
+      },
+    };
+    config = configs[period as Exclude<Period, "custom">];
+  }
+
+  const { count, labelFn, bucketFn } = config;
   const buckets: DataPoint[] = Array.from({ length: count }, (_, i) => ({
     label: labelFn(i), input: 0, output: 0, cache: 0,
   }));
@@ -100,13 +136,24 @@ function cleanProject(project: string | null, source: string): string {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const period = (searchParams.get("period") ?? "1w") as Period;
+  const period = (searchParams.get("period") ?? "5d") as Period;
   const sourceFilter = searchParams.get("source") ?? "all";
+  const fromParam = searchParams.get("from");
+  const toParam = searchParams.get("to");
+
   const now = Date.now();
-  const since = new Date(now - PERIOD_MS[period]);
+  let since = new Date(now - (PERIOD_MS[period as Exclude<Period, "custom">] ?? PERIOD_MS["5d"]));
+  let toDate = new Date(now);
+
+  if (period === "custom" && fromParam && toParam) {
+    since = new Date(fromParam);
+    since.setHours(0, 0, 0, 0);
+    toDate = new Date(toParam);
+    toDate.setHours(23, 59, 59, 999);
+  }
 
   const where = {
-    timestamp: { gte: since },
+    timestamp: { gte: since, lte: toDate },
     ...(sourceFilter !== "all" ? { source: sourceFilter } : {}),
   };
 
@@ -142,13 +189,13 @@ export async function GET(request: NextRequest) {
 
     prisma.call.groupBy({
       by: ["source"],
-      where: { timestamp: { gte: since } }, // always all sources for platform overview
+      where: { timestamp: { gte: since, lte: toDate } }, // always all sources for platform overview
       _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
       _count: { id: true },
     }),
   ]);
 
-  const chartData = buildChartData(rows, period, now);
+  const chartData = buildChartData(rows, period, now, since.getTime(), toDate.getTime());
 
   const summary = {
     totalInput:  agg._sum.inputTokens  ?? 0,

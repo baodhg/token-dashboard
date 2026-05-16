@@ -173,29 +173,70 @@ function PlatformCards({ platforms, total, loading }: {
 /* ─── page ─────────────────────────────────────────────── */
 
 export default function DashboardPage() {
-  const [period, setPeriod]       = useState<Period>("1w");
+  const [period, setPeriod]       = useState<Period>("5d");
   const [source, setSource]       = useState<Source>("all");
   const [data, setData]           = useState<ApiData | null>(null);
   const [loading, setLoading]     = useState(true);
   const [syncing, setSyncing]     = useState(false);
   const [lastSynced, setLastSynced] = useState<number | null>(null);
-  const [theme, setTheme]         = useState<"light" | "dark">("light");
+  const [theme, setTheme]         = useState<"light" | "dark" | "system">("system");
+  const [customRange, setCustomRange] = useState({
+    from: new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0],
+    to: new Date().toISOString().split('T')[0]
+  });
 
   useEffect(() => {
-    const isDark = document.documentElement.classList.contains("dark");
-    setTheme(isDark ? "dark" : "light");
+    const t = localStorage.getItem("theme") as "light" | "dark" | "system" | null;
+    if (t) setTheme(t);
+    else setTheme("system");
   }, []);
 
+  useEffect(() => {
+    const applyTheme = (t: "light" | "dark" | "system") => {
+      const root = document.documentElement;
+      if (t === "dark") {
+        root.classList.add("dark");
+      } else if (t === "light") {
+        root.classList.remove("dark");
+      } else {
+        if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+          root.classList.add("dark");
+        } else {
+          root.classList.remove("dark");
+        }
+      }
+    };
+
+    applyTheme(theme);
+
+    if (theme === "system") {
+      const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      const handleChange = (e: MediaQueryListEvent) => {
+        const root = document.documentElement;
+        if (e.matches) root.classList.add("dark");
+        else root.classList.remove("dark");
+      };
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    }
+  }, [theme]);
+
   const toggleTheme = () => {
-    const next = theme === "dark" ? "light" : "dark";
+    const next = theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
     setTheme(next);
-    document.documentElement.classList.toggle("dark", next === "dark");
-    try { localStorage.setItem("theme", next); } catch {}
+    try { 
+      if (next === "system") localStorage.removeItem("theme");
+      else localStorage.setItem("theme", next);
+    } catch {}
   };
 
-  const fetchStats = (p: Period, s: Source) => {
+  const fetchStats = (p: Period, s: Source, range = customRange) => {
     setLoading(true);
     const qs = new URLSearchParams({ period: p, ...(s !== "all" ? { source: s } : {}) });
+    if (p === "custom") {
+      qs.append("from", range.from);
+      qs.append("to", range.to);
+    }
     fetch(`/api/token-stats?${qs}`)
       .then(r => r.json())
       .then(setData)
@@ -206,11 +247,11 @@ export default function DashboardPage() {
   const handleSync = () => {
     setSyncing(true);
     fetch("/api/sync", { method: "POST" })
-      .then(() => { setLastSynced(Date.now()); fetchStats(period, source); })
+      .then(() => { setLastSynced(Date.now()); fetchStats(period, source, customRange); })
       .finally(() => setSyncing(false));
   };
 
-  useEffect(() => { fetchStats(period, source); }, [period, source]);
+  useEffect(() => { fetchStats(period, source, customRange); }, [period, source, customRange.from, customRange.to]);
 
   // Smart Polling
   useEffect(() => {
@@ -222,6 +263,10 @@ export default function DashboardPage() {
             setLastSynced(Date.now());
             // Fetch silently without setting global loading state
             const qs = new URLSearchParams({ period, ...(source !== "all" ? { source } : {}) });
+            if (period === "custom") {
+              qs.append("from", customRange.from);
+              qs.append("to", customRange.to);
+            }
             fetch(`/api/token-stats?${qs}`)
               .then(r => r.json())
               .then(setData)
@@ -232,7 +277,7 @@ export default function DashboardPage() {
     }, 5000); // Poll every 5 seconds
 
     return () => clearInterval(interval);
-  }, [period, source]);
+  }, [period, source, customRange.from, customRange.to]);
 
   const summary      = data?.summary      ?? EMPTY_SUMMARY;
   const chartData    = data?.chartData    ?? [];
@@ -310,6 +355,23 @@ export default function DashboardPage() {
                 {label}
               </button>
             ))}
+            {period === "custom" && (
+              <div className="flex items-center gap-1.5 ml-2 border-l border-border pl-3">
+                <input
+                  type="date"
+                  value={customRange.from}
+                  onChange={e => setCustomRange(p => ({ ...p, from: e.target.value }))}
+                  className="bg-transparent text-[12px] text-foreground border border-border rounded-md px-2 py-1 outline-none focus:border-foreground"
+                />
+                <span className="text-[#8e8e93] dark:text-[#98989d] text-[12px]">-</span>
+                <input
+                  type="date"
+                  value={customRange.to}
+                  onChange={e => setCustomRange(p => ({ ...p, to: e.target.value }))}
+                  className="bg-transparent text-[12px] text-foreground border border-border rounded-md px-2 py-1 outline-none focus:border-foreground"
+                />
+              </div>
+            )}
           </div>
 
           {/* Right cluster: theme toggle + sync */}

@@ -1,4 +1,4 @@
-export type Period = "1d" | "3d" | "5d" | "1w" | "1m" | "1y";
+export type Period = "1d" | "3d" | "5d" | "1w" | "1m" | "1y" | "custom";
 
 export interface DataPoint {
   label: string;
@@ -24,6 +24,7 @@ export const PERIODS: { key: Period; label: string }[] = [
   { key: "1w", label: "Tuần" },
   { key: "1m", label: "Tháng" },
   { key: "1y", label: "Năm" },
+  { key: "custom", label: "Tuỳ chỉnh" },
 ];
 
 export function calcSummary(data: DataPoint[]) {

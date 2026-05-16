@@ -50,7 +50,7 @@ function CustomLegend({ payload }: any) {
   );
 }
 
-const X_INTERVAL: Record<Period, number> = {
+const X_INTERVAL: Record<Exclude<Period, "custom">, number> = {
   "1d": 3,   // every 4 hours → 6 labels
   "3d": 2,   // every 3rd point → 4 labels
   "5d": 0,
@@ -59,11 +59,16 @@ const X_INTERVAL: Record<Period, number> = {
   "1y": 0,
 };
 
+function getInterval(p: Period, len: number) {
+  if (p === "custom") return Math.max(0, Math.floor(len / 8));
+  return X_INTERVAL[p] ?? 0;
+}
+
 export default function TokenChart({ data, period }: Props) {
   const maxVal = Math.max(...data.map(d => d.input + d.output), 1);
   const ticks = Array.from({ length: 5 }, (_, i) => Math.round((maxVal / 4) * i));
 
-  const needsAngle = period === "1m" || period === "1d";
+  const needsAngle = period === "1m" || period === "1d" || (period === "custom" && data.length > 7);
 
   return (
     <ResponsiveContainer width="100%" height={280}>
@@ -71,7 +76,7 @@ export default function TokenChart({ data, period }: Props) {
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
         <XAxis
           dataKey="label"
-          interval={X_INTERVAL[period]}
+          interval={getInterval(period, data.length)}
           tick={{
             fontSize: 11,
             fill: "var(--chart-tick)",
