@@ -200,48 +200,54 @@ function PlatformCards({ platforms, total, loading }: {
 
 function AgentLogo() {
   return (
-    <div className="relative w-7 h-7 flex items-center justify-center shrink-0">
-      {/* Background Glow */}
-      <div className="absolute inset-0 bg-linear-to-br from-indigo-500 to-purple-600 rounded-lg shadow-sm" />
+    <div className="relative w-9 h-9 flex items-center justify-center shrink-0 group">
+      {/* Background Glow - New Cyber Gradient */}
+      <div className="absolute inset-0 bg-linear-to-br from-emerald-400 via-cyan-500 to-blue-600 rounded-xl shadow-lg shadow-cyan-500/20 group-hover:shadow-cyan-500/40 transition-all duration-500" />
       
       {/* Custom SVG Agent Icon */}
       <svg
         viewBox="0 0 24 24"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
-        className="w-4 h-4 relative z-10 text-white"
+        className="w-5 h-5 relative z-10 text-white"
       >
         {/* The Outer Frame (Terminal-like) */}
         <path
           d="M4 6C4 4.89543 4.89543 4 6 4H18C19.1046 4 20 4.89543 20 6V18C20 19.1046 19.1046 20 18 20H6C4.89543 20 4 19.1046 4 18V6Z"
           stroke="currentColor"
-          strokeWidth="1.5"
-          className="opacity-40"
+          strokeWidth="1.8"
+          className="opacity-50"
         />
         {/* The Prompt Symbol */}
         <path
-          d="M8 9L10 11L8 13"
+          d="M7.5 9L9.5 11L7.5 13"
           stroke="currentColor"
-          strokeWidth="2"
+          strokeWidth="2.5"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
         {/* The Pulsing Core (The "Eye" of the Agent) */}
         <circle
-          cx="15"
+          cx="14.5"
           cy="12"
-          r="2.5"
-          fill="currentColor"
-          className="animate-pulse"
+          r="3"
+          fill="white"
+          className="animate-pulse shadow-sm"
         />
+        {/* Connection paths to dots */}
+        <path d="M14.5 9V7" stroke="white" strokeWidth="1" className="opacity-40" />
+        <path d="M17.5 12H19" stroke="white" strokeWidth="1" className="opacity-40" />
+        <path d="M14.5 15V17" stroke="white" strokeWidth="1" className="opacity-40" />
+
         {/* Orbital dots */}
-        <circle cx="15" cy="7" r="1" fill="currentColor" className="opacity-60" />
-        <circle cx="19" cy="12" r="1" fill="currentColor" className="opacity-60" />
-        <circle cx="15" cy="17" r="1" fill="currentColor" className="opacity-60" />
+        <circle cx="14.5" cy="7" r="1.2" fill="white" className="opacity-80" />
+        <circle cx="19" cy="12" r="1.2" fill="white" className="opacity-80" />
+        <circle cx="14.5" cy="17" r="1.2" fill="white" className="opacity-80" />
       </svg>
       
-      {/* Extra light effect */}
-      <div className="absolute inset-0 rounded-lg bg-white/10 group-hover:bg-white/20 transition-colors" />
+      {/* Inner reflection */}
+      <div className="absolute inset-0 rounded-xl bg-linear-to-t from-black/10 to-transparent" />
+      <div className="absolute top-0 left-0 right-0 h-[1px] bg-white/30 rounded-t-xl" />
     </div>
   );
 }
