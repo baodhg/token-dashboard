@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { Geist_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
+import { I18nProvider } from "@/lib/i18n-context";
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -38,7 +39,12 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: setInitialTheme }} />
       </head>
-      <body className="min-h-full bg-background text-foreground">{children}</body>
+      <body className="min-h-full bg-background text-foreground">
+        <I18nProvider>
+          {children}
+        </I18nProvider>
+      </body>
     </html>
   );
 }
+

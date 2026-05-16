@@ -1,0 +1,38 @@
+{
+  "common": {
+    "total_tokens": "Tổng Tokens",
+    "input_tokens": "Input Tokens",
+    "output_tokens": "Output Tokens",
+    "estimated_cost": "Chi phí ước tính",
+    "reference_price": "Giá tham khảo",
+    "total": "tổng",
+    "calls": "lượt gọi",
+    "syncing": "Đang sync...",
+    "sync": "Sync",
+    "loading": "Đang tải...",
+    "no_data": "Không có dữ liệu",
+    "all": "Tất cả",
+    "platforms": "Platforms",
+    "input_output": "Input / Output",
+    "cache_read": "Cache read",
+    "tokens_by_model": "Tokens theo model",
+    "recent_sessions": "Sessions gần nhất",
+    "project_stats": "Thống kê theo dự án",
+    "search_project": "Tìm tên dự án...",
+    "no_projects_found": "Không tìm thấy dự án nào",
+    "project": "Dự án",
+    "start_time": "Bắt đầu",
+    "activity": "Hoạt động",
+    "tokens": "Tokens",
+    "cost": "Chi phí"
+  },
+  "periods": {
+    "1d": "Hôm nay",
+    "3d": "3 ngày",
+    "5d": "5 ngày",
+    "1w": "Tuần",
+    "1m": "Tháng",
+    "1y": "Năm",
+    "custom": "Tuỳ chỉnh"
+  }
+}

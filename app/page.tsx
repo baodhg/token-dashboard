@@ -1,14 +1,15 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import {
   Zap, ArrowDownLeft, ArrowUpRight, DollarSign,
   RefreshCw, Database, Clock, FolderOpen, Sun, Moon, Laptop,
-  ChevronUp, ChevronDown, Search
+  ChevronUp, ChevronDown, Search, Languages
 } from "lucide-react";
 import { PERIODS, type Period, type DataPoint } from "@/lib/mock-data";
 import type { ModelStat } from "@/components/ModelChart";
+import { useI18n } from "@/lib/i18n-context";
 
 const TokenChart = dynamic<{ data: DataPoint[]; period: Period }>(
   () => import("@/components/TokenChart"), { ssr: false }
@@ -20,7 +21,7 @@ const ModelChart = dynamic<{ data: ModelStat[] }>(
   () => import("@/components/ModelChart"), { ssr: false }
 );
 
-/* ─── helpers ─────────────────────────────────────────── */
+/* â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function formatK(n: number) {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
@@ -29,15 +30,15 @@ function formatK(n: number) {
   return String(n);
 }
 
-function fmtTime(iso: string) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("vi-VN", {
+function fmtTime(iso: string, locale: string) {
+  if (!iso) return "â€”";
+  return new Date(iso).toLocaleString(locale === "vi" ? "vi-VN" : "en-US", {
     day: "2-digit", month: "2-digit",
     hour: "2-digit", minute: "2-digit",
   });
 }
 
-/* ─── types ────────────────────────────────────────────── */
+/* â”€â”€â”€ types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 type Source = "all" | "claude_code" | "cline" | "codex" | "gemini";
 
@@ -81,7 +82,7 @@ const EMPTY_SUMMARY: Summary = {
 };
 
 const SOURCE_LABELS: Record<Source, string> = {
-  all:          "Tất cả",
+  all:          "Táº¥t cáº£",
   claude_code:  "Claude Code",
   cline:        "Cline",
   codex:        "Codex",
@@ -95,7 +96,7 @@ const SOURCE_COLORS: Record<string, string> = {
   gemini:      "#22d3ee",
 };
 
-/* ─── stat card ────────────────────────────────────────── */
+/* â”€â”€â”€ stat card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function StatCard({
   label, value, sub, icon: Icon, iconBg, iconColor, loading,
@@ -111,7 +112,7 @@ function StatCard({
       <div>
         <p className="text-[10px] font-semibold text-[#8e8e93] dark:text-[#98989d] uppercase tracking-widest mb-1">{label}</p>
         <p className={`font-numeric text-[26px] font-bold text-foreground leading-none tracking-tight ${loading ? "opacity-30" : ""}`}>
-          {loading ? "···" : value}
+          {loading ? "Â·Â·Â·" : value}
         </p>
         <p className="text-[11px] text-[#aeaeb2] dark:text-[#6e6e72] mt-1.5">{sub}</p>
       </div>
@@ -119,7 +120,7 @@ function StatCard({
   );
 }
 
-/* ─── section header ───────────────────────────────────── */
+/* â”€â”€â”€ section header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function SectionHeader({ title, right }: { title: string; right?: React.ReactNode }) {
   return (
@@ -132,7 +133,7 @@ function SectionHeader({ title, right }: { title: string; right?: React.ReactNod
 
 import Image from "next/image";
 
-/* ─── platform badge ───────────────────────────────────── */
+/* â”€â”€â”€ platform badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function SourceBadge({ source }: { source: string }) {
   const color = SOURCE_COLORS[source] ?? "#8e8e93";
@@ -154,12 +155,11 @@ function SourceBadge({ source }: { source: string }) {
       ) : (
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
       )}
-      {label}
-    </span>
+      {label}</span>
   );
 }
 
-/* ─── platform overview cards ──────────────────────────── */
+/* â”€â”€â”€ platform overview cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function PlatformCards({ platforms, total, loading }: {
   platforms: PlatformStat[]; total: number; loading: boolean;
@@ -196,7 +196,21 @@ function PlatformCards({ platforms, total, loading }: {
   );
 }
 
-/* ─── agent logo ───────────────────────────────────────── */
+/* â”€â”€â”€ agent logo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+
+function LanguageSwitcher() {
+  const { locale, setLocale } = useI18n();
+  return (
+    <button
+      onClick={() => setLocale(locale === "vi" ? "en" : "vi")}
+      className="flex items-center gap-1.5 px-3 h-8 rounded-full bg-muted hover:bg-muted/70 text-[12px] font-medium text-[#3c3c43] dark:text-[#c7c7cc] transition-colors cursor-pointer"
+    >
+      <Languages className="w-3.5 h-3.5" />
+      <span className="uppercase">{locale}</span>
+    </button>
+  );
+}
 
 function AgentLogo() {
   return (
@@ -252,9 +266,10 @@ function AgentLogo() {
   );
 }
 
-/* ─── page ─────────────────────────────────────────────── */
+/* â”€â”€â”€ page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export default function DashboardPage() {
+  const { t, locale } = useI18n();
   const [period, setPeriod]       = useState<Period>("1d");
   const [source, setSource]       = useState<Source>("all");
   const [data, setData]           = useState<ApiData | null>(null);
@@ -404,37 +419,37 @@ export default function DashboardPage() {
   };
 
   const pct = (n: number) =>
-    summary.total > 0 ? `${((n / summary.total) * 100).toFixed(0)}%` : "—";
+    summary.total > 0 ? `${((n / summary.total) * 100).toFixed(0)}%` : "â€”";
 
   const statCards = [
     {
-      label: "Tổng tokens",
+      label: "Tá»•ng tokens",
       value: formatK(summary.total),
-      sub:   `${summary.callCount.toLocaleString()} lượt gọi`,
+      sub:   `${summary.callCount.toLocaleString()} lÆ°á»£t gá»i`,
       icon: Zap,
       iconBg: "bg-indigo-50 dark:bg-indigo-500/15",
       iconColor: "text-indigo-600 dark:text-indigo-400",
     },
     {
-      label: "Input tokens",
+      label: t("common.input_tokens"),
       value: formatK(summary.totalInput),
-      sub:   `${pct(summary.totalInput)} tổng`,
+      sub:   `${pct(summary.totalInput)} tá»•ng`,
       icon: ArrowDownLeft,
       iconBg: "bg-purple-50 dark:bg-purple-500/15",
       iconColor: "text-purple-600 dark:text-purple-400",
     },
     {
-      label: "Output tokens",
+      label: t("common.output_tokens"),
       value: formatK(summary.totalOutput),
-      sub:   `${pct(summary.totalOutput)} tổng`,
+      sub:   `${pct(summary.totalOutput)} tá»•ng`,
       icon: ArrowUpRight,
       iconBg: "bg-violet-50 dark:bg-violet-500/15",
       iconColor: "text-violet-600 dark:text-violet-400",
     },
     {
-      label: "Chi phí ước tính",
+      label: "Chi phÃ­ Æ°á»›c tÃ­nh",
       value: `$${summary.totalCost.toFixed(4)}`,
-      sub:   "Giá tham khảo",
+      sub:   "GiÃ¡ tham kháº£o",
       icon: DollarSign,
       iconBg: "bg-emerald-50 dark:bg-emerald-500/15",
       iconColor: "text-emerald-600 dark:text-emerald-400",
@@ -446,7 +461,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-background">
 
-      {/* ── Header ── */}
+      {/* â”€â”€ Header â”€â”€ */}
       <header className="bg-card border-b border-border sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between gap-4">
 
@@ -458,7 +473,7 @@ export default function DashboardPage() {
 
           {/* Period pills */}
           <div className="flex items-center gap-1.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-            {PERIODS.map(({ key, label }) => (
+            {PERIODS.map(({ key }) => (
               <button
                 key={key}
                 onClick={() => setPeriod(key)}
@@ -468,7 +483,7 @@ export default function DashboardPage() {
                     : "text-[#3c3c43] dark:text-[#c7c7cc] hover:bg-muted"
                 }`}
               >
-                {label}
+                {t(`periods.${key}`)}
               </button>
             ))}
             {period === "custom" && (
@@ -492,6 +507,7 @@ export default function DashboardPage() {
 
           {/* Right cluster: theme toggle + sync */}
           <div className="flex items-center gap-2 shrink-0">
+            <LanguageSwitcher />
             <button
               onClick={toggleTheme}
               aria-label="Toggle theme"
@@ -507,7 +523,7 @@ export default function DashboardPage() {
             >
               <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
               {syncing
-                ? "Đang sync…"
+                ? "Äang syncâ€¦"
                 : lastSynced
                   ? new Date(lastSynced).toLocaleTimeString("vi-VN")
                   : "Sync"}
@@ -516,7 +532,7 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* ── Main ── */}
+      {/* â”€â”€ Main â”€â”€ */}
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-5">
 
         {/* Source filter */}
@@ -537,7 +553,7 @@ export default function DashboardPage() {
                   style={{ background: source === s ? "currentColor" : SOURCE_COLORS[s] }}
                 />
               )}
-              {SOURCE_LABELS[s]}
+              {s === "all" ? t("common.all") : SOURCE_LABELS[s]}
             </button>
           ))}
         </div>
@@ -563,11 +579,11 @@ export default function DashboardPage() {
 
         {/* Row 2: Input / Output line chart */}
         <div className="bg-card rounded-2xl p-5 border border-border shadow-sm">
-          <SectionHeader title="Input / Output" />
+          <SectionHeader title={t("common.input_output")} />
           {loading ? (
-            <div className="h-64 flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Đang tải…</div>
+            <div className="h-64 flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Äang táº£iâ€¦</div>
           ) : chartEmpty ? (
-            <div className="h-64 flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Không có dữ liệu</div>
+            <div className="h-64 flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">KhÃ´ng cÃ³ dá»¯ liá»‡u</div>
           ) : (
             <TokenChart data={chartData} period={period} />
           )}
@@ -576,12 +592,12 @@ export default function DashboardPage() {
         {/* Row 3: Cache read bar chart + Tokens theo model */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
           <div className="lg:col-span-3 bg-card rounded-2xl p-5 border border-border shadow-sm">
-            <SectionHeader title="Cache read" />
+            <SectionHeader title={t("common.cache_read")} />
             <div className="h-52">
               {loading ? (
-                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Đang tải…</div>
+                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Äang táº£iâ€¦</div>
               ) : chartEmpty ? (
-                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Không có dữ liệu</div>
+                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">KhÃ´ng cÃ³ dá»¯ liá»‡u</div>
               ) : (
                 <CacheChart data={chartData} period={period} />
               )}
@@ -589,10 +605,10 @@ export default function DashboardPage() {
           </div>
 
           <div className="lg:col-span-2 bg-card rounded-2xl p-5 border border-border shadow-sm">
-            <SectionHeader title="Tokens theo model" />
+            <SectionHeader title={t("common.tokens_by_model")} />
             <div className="h-52">
               {loading ? (
-                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Đang tải…</div>
+                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Äang táº£iâ€¦</div>
               ) : (
                 <ModelChart data={modelStats} />
               )}
@@ -612,7 +628,7 @@ export default function DashboardPage() {
                     : "text-[#8e8e93] hover:text-foreground"
                 }`}
               >
-                Sessions gần nhất
+                Sessions gáº§n nháº¥t
               </button>
               <button
                 onClick={() => setViewMode("projects")}
@@ -622,7 +638,7 @@ export default function DashboardPage() {
                     : "text-[#8e8e93] hover:text-foreground"
                 }`}
               >
-                Thống kê theo dự án
+                Thá»‘ng kÃª theo dá»± Ã¡n
               </button>
             </div>
 
@@ -632,7 +648,7 @@ export default function DashboardPage() {
                   <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8e8e93]" />
                   <input
                     type="text"
-                    placeholder="Tìm tên dự án..."
+                    placeholder="TÃ¬m tÃªn dá»± Ã¡n..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-9 pr-4 py-1.5 bg-muted/50 border border-transparent focus:border-border rounded-xl text-[12px] outline-none w-48 sm:w-64 transition-all"
@@ -640,14 +656,14 @@ export default function DashboardPage() {
                 </div>
               )}
               <span className="text-[11px] text-[#aeaeb2] dark:text-[#6e6e72] whitespace-nowrap">
-                {viewMode === "sessions" ? `${sessionStats.length} sessions` : `${filteredProjects.length} dự án`}
+                {viewMode === "sessions" ? `${sessionStats.length} sessions` : `${filteredProjects.length} dá»± Ã¡n`}
               </span>
             </div>
           </div>
 
           {viewMode === "sessions" ? (
             sessionStats.length === 0 && !loading ? (
-              <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">Không có dữ liệu</div>
+              <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">KhÃ´ng cÃ³ dá»¯ liá»‡u</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-[12px]">
@@ -655,17 +671,16 @@ export default function DashboardPage() {
                     <tr className="border-b border-border bg-muted/20">
                       {[
                         { label: "Platform", icon: null,      key: "source" },
-                        { label: "Dự án",    icon: FolderOpen, key: "project" },
-                        { label: "Bắt đầu",  icon: Clock,      key: "startTime" },
+                        { label: "Dá»± Ã¡n",    icon: FolderOpen, key: "project" },
+                        { label: "Báº¯t Ä‘áº§u",  icon: Clock,      key: "startTime" },
                         { label: "Calls",    icon: null,       key: "callCount" },
                         { label: "Tokens",   icon: null,       key: "tokens" },
-                        { label: "Chi phí",  icon: null,       key: "totalCost" },
+                        { label: "Chi phÃ­",  icon: null,       key: "totalCost" },
                       ].map(({ label, icon: Icon }) => (
                         <th key={label} className="text-left px-4 py-3 text-[10px] font-bold text-[#aeaeb2] dark:text-[#6e6e72] uppercase tracking-wide whitespace-nowrap">
                           <span className="flex items-center gap-1">
                             {Icon && <Icon className="w-3 h-3" />}
-                            {label}
-                          </span>
+                            {label}</span>
                         </th>
                       ))}
                     </tr>
@@ -687,7 +702,7 @@ export default function DashboardPage() {
                           </span>
                         </td>
                         <td className="font-numeric px-4 py-2.5 text-[#8e8e93] dark:text-[#98989d] whitespace-nowrap">
-                          {fmtTime(s.startTime)}
+                          {fmtTime(s.startTime, locale)}
                         </td>
                         <td className="font-numeric px-4 py-2.5 text-[#3c3c43] dark:text-[#c7c7cc]">
                           {s.callCount.toLocaleString()}
@@ -706,19 +721,19 @@ export default function DashboardPage() {
             )
           ) : (
             filteredProjects.length === 0 && !loading ? (
-              <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">Không tìm thấy dự án nào</div>
+              <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">KhÃ´ng tÃ¬m tháº¥y dá»± Ã¡n nÃ o</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-[12px]">
                   <thead>
                     <tr className="border-b border-border bg-muted/20">
                       {[
-                        { label: "Dự án",    key: "project",   icon: FolderOpen },
+                        { label: "Dá»± Ã¡n",    key: "project",   icon: FolderOpen },
                         { label: "Platforms", key: "platforms", icon: null },
-                        { label: "Hoạt động", key: "startTime", icon: Clock },
+                        { label: "Hoáº¡t Ä‘á»™ng", key: "startTime", icon: Clock },
                         { label: "Calls",    key: "callCount", icon: null },
                         { label: "Tokens",   key: "tokens",    icon: null },
-                        { label: "Chi phí",  key: "totalCost", icon: null },
+                        { label: "Chi phÃ­",  key: "totalCost", icon: null },
                       ].map(({ label, key, icon: Icon }) => (
                         <th 
                           key={key} 
@@ -727,8 +742,7 @@ export default function DashboardPage() {
                         >
                           <span className="flex items-center gap-1">
                             {Icon && <Icon className="w-3 h-3" />}
-                            {label}
-                            <SortIcon field={key} />
+                            {t(`periods.${key}`)} <SortIcon field={key} />
                           </span>
                         </th>
                       ))}
@@ -753,7 +767,7 @@ export default function DashboardPage() {
                           </div>
                         </td>
                         <td className="font-numeric px-4 py-2.5 text-[#8e8e93] dark:text-[#98989d] whitespace-nowrap">
-                          {fmtTime(p.startTime)}
+                          {fmtTime(p.startTime, locale)}
                         </td>
                         <td className="font-numeric px-4 py-2.5 text-[#3c3c43] dark:text-[#c7c7cc]">
                           {p.callCount.toLocaleString()}
@@ -777,3 +791,18 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

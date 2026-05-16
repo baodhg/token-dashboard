@@ -1,0 +1,38 @@
+{
+  "common": {
+    "total_tokens": "Total Tokens",
+    "input_tokens": "Input Tokens",
+    "output_tokens": "Output Tokens",
+    "estimated_cost": "Estimated Cost",
+    "reference_price": "Reference Price",
+    "total": "total",
+    "calls": "calls",
+    "syncing": "Syncing...",
+    "sync": "Sync",
+    "loading": "Loading...",
+    "no_data": "No data",
+    "all": "All",
+    "platforms": "Platforms",
+    "input_output": "Input / Output",
+    "cache_read": "Cache Read",
+    "tokens_by_model": "Tokens by Model",
+    "recent_sessions": "Recent Sessions",
+    "project_stats": "Project Stats",
+    "search_project": "Search project...",
+    "no_projects_found": "No projects found",
+    "project": "Project",
+    "start_time": "Start Time",
+    "activity": "Activity",
+    "tokens": "Tokens",
+    "cost": "Cost"
+  },
+  "periods": {
+    "1d": "Today",
+    "3d": "3 days",
+    "5d": "5 days",
+    "1w": "Week",
+    "1m": "Month",
+    "1y": "Year",
+    "custom": "Custom"
+  }
+}
