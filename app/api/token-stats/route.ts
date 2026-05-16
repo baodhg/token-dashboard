@@ -134,6 +134,18 @@ function cleanProject(project: string | null, source: string): string {
   return project;
 }
 
+interface ProjectStat {
+  project: string;
+  sources: string[];
+  startTime: string;
+  endTime: string;
+  callCount: number;
+  totalInput: number;
+  totalOutput: number;
+  totalCache: number;
+  totalCost: number;
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const period = (searchParams.get("period") ?? "1d") as Period;
@@ -145,7 +157,10 @@ export async function GET(request: NextRequest) {
   let since = new Date(now - (PERIOD_MS[period as Exclude<Period, "custom">] ?? PERIOD_MS["1d"]));
   let toDate = new Date(now);
 
-  if (period === "custom" && fromParam && toParam) {
+  if (period === "1d") {
+    since = new Date(now);
+    since.setHours(0, 0, 0, 0);
+  } else if (period === "custom" && fromParam && toParam) {
     since = new Date(fromParam);
     since.setHours(0, 0, 0, 0);
     toDate = new Date(toParam);
@@ -157,7 +172,7 @@ export async function GET(request: NextRequest) {
     ...(sourceFilter !== "all" ? { source: sourceFilter } : {}),
   };
 
-  const [rows, agg, rawSessions, rawModels, rawPlatforms] = await Promise.all([
+  const [rows, agg, rawSessions, rawProjects, rawModels, rawPlatforms] = await Promise.all([
     prisma.call.findMany({
       where,
       select: { inputTokens: true, outputTokens: true, cacheTokens: true, timestamp: true },
@@ -177,6 +192,15 @@ export async function GET(request: NextRequest) {
       _count: { id: true },
       orderBy: [{ _min: { timestamp: "desc" } }],
       take: 20,
+    }),
+
+    prisma.call.groupBy({
+      by: ["project", "source"],
+      where,
+      _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
+      _min: { timestamp: true },
+      _max: { timestamp: true },
+      _count: { id: true },
     }),
 
     prisma.call.groupBy({
@@ -218,6 +242,40 @@ export async function GET(request: NextRequest) {
     totalCost:   s._sum.cost         ?? 0,
   }));
 
+  const projectMap = new Map<string, ProjectStat>();
+  rawProjects.forEach(p => {
+    const name = cleanProject(p.project, p.source);
+    const existing = projectMap.get(name);
+    if (existing) {
+      if (!existing.sources.includes(p.source)) existing.sources.push(p.source);
+      existing.callCount += p._count.id;
+      existing.totalInput += p._sum.inputTokens ?? 0;
+      existing.totalOutput += p._sum.outputTokens ?? 0;
+      existing.totalCache += p._sum.cacheTokens ?? 0;
+      existing.totalCost += p._sum.cost ?? 0;
+      if (p._min.timestamp && new Date(p._min.timestamp) < new Date(existing.startTime)) {
+        existing.startTime = p._min.timestamp.toISOString();
+      }
+      if (p._max.timestamp && new Date(p._max.timestamp) > new Date(existing.endTime)) {
+        existing.endTime = p._max.timestamp.toISOString();
+      }
+    } else {
+      projectMap.set(name, {
+        project: name,
+        sources: [p.source],
+        startTime: p._min.timestamp?.toISOString() ?? "",
+        endTime: p._max.timestamp?.toISOString() ?? "",
+        callCount: p._count.id,
+        totalInput: p._sum.inputTokens ?? 0,
+        totalOutput: p._sum.outputTokens ?? 0,
+        totalCache: p._sum.cacheTokens ?? 0,
+        totalCost: p._sum.cost ?? 0,
+      });
+    }
+  });
+
+  const projectStats = Array.from(projectMap.values()).sort((a, b) => b.totalCost - a.totalCost);
+
   const modelStats = rawModels.map(m => ({
     model:       m.model,
     label:       modelLabel(m.model),
@@ -240,5 +298,5 @@ export async function GET(request: NextRequest) {
     totalTokens: (p._sum.inputTokens ?? 0) + (p._sum.outputTokens ?? 0),
   }));
 
-  return Response.json({ chartData, summary, sessionStats, modelStats, platformStats });
+  return Response.json({ chartData, summary, sessionStats, projectStats, modelStats, platformStats });
 }

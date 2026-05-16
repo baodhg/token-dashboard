@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import {
   Zap, ArrowDownLeft, ArrowUpRight, DollarSign,
-  RefreshCw, Database, Clock, FolderOpen, Sun, Moon, Laptop
+  RefreshCw, Database, Clock, FolderOpen, Sun, Moon, Laptop,
+  ChevronUp, ChevronDown, Search
 } from "lucide-react";
 import { PERIODS, type Period, type DataPoint } from "@/lib/mock-data";
 import type { ModelStat } from "@/components/ModelChart";
@@ -54,10 +55,22 @@ interface PlatformStat {
   callCount: number; totalInput: number; totalOutput: number;
   totalCache: number; totalCost: number; totalTokens: number;
 }
+interface ProjectStat {
+  project: string;
+  sources: string[];
+  startTime: string;
+  endTime: string;
+  callCount: number;
+  totalInput: number;
+  totalOutput: number;
+  totalCache: number;
+  totalCost: number;
+}
 interface ApiData {
   chartData:     DataPoint[];
   summary:       Summary;
   sessionStats:  SessionStat[];
+  projectStats:  ProjectStat[];
   modelStats:    ModelStat[];
   platformStats: PlatformStat[];
 }
@@ -295,8 +308,44 @@ export default function DashboardPage() {
   const summary      = data?.summary      ?? EMPTY_SUMMARY;
   const chartData    = data?.chartData    ?? [];
   const sessionStats = data?.sessionStats ?? [];
+  const projectStats = data?.projectStats ?? [];
   const modelStats   = data?.modelStats   ?? [];
   const platformStats = data?.platformStats ?? [];
+
+  const [viewMode, setViewMode] = useState<"sessions" | "projects">("sessions");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<string>("totalCost");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+
+  const filteredProjects = projectStats
+    .filter(p => p.project.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      let vA: any, vB: any;
+      if (sortField === "project") { vA = a.project; vB = b.project; }
+      else if (sortField === "startTime") { vA = new Date(a.startTime).getTime(); vB = new Date(b.startTime).getTime(); }
+      else if (sortField === "callCount") { vA = a.callCount; vB = b.callCount; }
+      else if (sortField === "tokens") { vA = a.totalInput + a.totalOutput; vB = b.totalInput + b.totalOutput; }
+      else if (sortField === "totalCost") { vA = a.totalCost; vB = b.totalCost; }
+      else if (sortField === "platforms") { vA = a.sources.join(","); vB = b.sources.join(","); }
+      
+      if (vA < vB) return sortOrder === "asc" ? -1 : 1;
+      if (vA > vB) return sortOrder === "asc" ? 1 : -1;
+      return 0;
+    });
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortOrder("desc");
+    }
+  };
+
+  const SortIcon = ({ field }: { field: string }) => {
+    if (sortField !== field) return <ChevronUp className="w-3 h-3 opacity-20" />;
+    return sortOrder === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />;
+  };
 
   const pct = (n: number) =>
     summary.total > 0 ? `${((n / summary.total) * 100).toFixed(0)}%` : "—";
@@ -497,72 +546,176 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Row 4: Sessions table */}
+        {/* Row 4: Sessions / Projects table */}
         <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-border">
-            <SectionHeader
-              title="Sessions gần nhất"
-              right={<span className="text-[11px] text-[#aeaeb2] dark:text-[#6e6e72]">{sessionStats.length} sessions</span>}
-            />
+          <div className="px-5 py-4 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center bg-muted/50 p-1 rounded-xl w-fit">
+              <button
+                onClick={() => setViewMode("sessions")}
+                className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all cursor-pointer ${
+                  viewMode === "sessions" 
+                    ? "bg-card text-foreground shadow-xs" 
+                    : "text-[#8e8e93] hover:text-foreground"
+                }`}
+              >
+                Sessions gần nhất
+              </button>
+              <button
+                onClick={() => setViewMode("projects")}
+                className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all cursor-pointer ${
+                  viewMode === "projects" 
+                    ? "bg-card text-foreground shadow-xs" 
+                    : "text-[#8e8e93] hover:text-foreground"
+                }`}
+              >
+                Thống kê theo dự án
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {viewMode === "projects" && (
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8e8e93]" />
+                  <input
+                    type="text"
+                    placeholder="Tìm tên dự án..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 pr-4 py-1.5 bg-muted/50 border border-transparent focus:border-border rounded-xl text-[12px] outline-none w-48 sm:w-64 transition-all"
+                  />
+                </div>
+              )}
+              <span className="text-[11px] text-[#aeaeb2] dark:text-[#6e6e72] whitespace-nowrap">
+                {viewMode === "sessions" ? `${sessionStats.length} sessions` : `${filteredProjects.length} dự án`}
+              </span>
+            </div>
           </div>
 
-          {sessionStats.length === 0 && !loading ? (
-            <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">Không có dữ liệu</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-[12px]">
-                <thead>
-                  <tr className="border-b border-border">
-                    {[
-                      { label: "Platform", icon: null      },
-                      { label: "Dự án",   icon: FolderOpen },
-                      { label: "Bắt đầu", icon: Clock      },
-                      { label: "Calls",   icon: null       },
-                      { label: "Tokens",  icon: null       },
-                      { label: "Chi phí", icon: null       },
-                    ].map(({ label, icon: Icon }) => (
-                      <th key={label} className="text-left px-4 py-2.5 text-[10px] font-semibold text-[#aeaeb2] dark:text-[#6e6e72] uppercase tracking-wide whitespace-nowrap">
-                        <span className="flex items-center gap-1">
-                          {Icon && <Icon className="w-3 h-3" />}
-                          {label}
-                        </span>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessionStats.map((s, i) => (
-                    <tr
-                      key={s.sessionId ?? i}
-                      className={`hover:bg-muted/50 transition-colors ${
-                        i < sessionStats.length - 1 ? "border-b border-border" : ""
-                      }`}
-                    >
-                      <td className="px-4 py-2.5">
-                        <SourceBadge source={s.source} />
-                      </td>
-                      <td className="px-4 py-2.5 max-w-35">
-                        <span className="block truncate font-medium text-foreground" title={s.project}>
-                          {s.project}
-                        </span>
-                      </td>
-                      <td className="font-numeric px-4 py-2.5 text-[#8e8e93] dark:text-[#98989d] whitespace-nowrap">
-                        {fmtTime(s.startTime)}
-                      </td>
-                      <td className="font-numeric px-4 py-2.5 text-[#3c3c43] dark:text-[#c7c7cc]">
-                        {s.callCount.toLocaleString()}
-                      </td>
-                      <td className="font-numeric px-4 py-2.5 text-foreground font-medium">
-                        {formatK(s.totalInput + s.totalOutput)}
-                      </td>
-                      <td className="font-numeric px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-semibold">
-                        ${s.totalCost.toFixed(4)}
-                      </td>
+          {viewMode === "sessions" ? (
+            sessionStats.length === 0 && !loading ? (
+              <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">Không có dữ liệu</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/20">
+                      {[
+                        { label: "Platform", icon: null,      key: "source" },
+                        { label: "Dự án",    icon: FolderOpen, key: "project" },
+                        { label: "Bắt đầu",  icon: Clock,      key: "startTime" },
+                        { label: "Calls",    icon: null,       key: "callCount" },
+                        { label: "Tokens",   icon: null,       key: "tokens" },
+                        { label: "Chi phí",  icon: null,       key: "totalCost" },
+                      ].map(({ label, icon: Icon }) => (
+                        <th key={label} className="text-left px-4 py-3 text-[10px] font-bold text-[#aeaeb2] dark:text-[#6e6e72] uppercase tracking-wide whitespace-nowrap">
+                          <span className="flex items-center gap-1">
+                            {Icon && <Icon className="w-3 h-3" />}
+                            {label}
+                          </span>
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {sessionStats.map((s, i) => (
+                      <tr
+                        key={s.sessionId ?? i}
+                        className={`hover:bg-muted/50 transition-colors ${
+                          i < sessionStats.length - 1 ? "border-b border-border" : ""
+                        }`}
+                      >
+                        <td className="px-4 py-2.5">
+                          <SourceBadge source={s.source} />
+                        </td>
+                        <td className="px-4 py-2.5 max-w-35">
+                          <span className="block truncate font-medium text-foreground" title={s.project}>
+                            {s.project}
+                          </span>
+                        </td>
+                        <td className="font-numeric px-4 py-2.5 text-[#8e8e93] dark:text-[#98989d] whitespace-nowrap">
+                          {fmtTime(s.startTime)}
+                        </td>
+                        <td className="font-numeric px-4 py-2.5 text-[#3c3c43] dark:text-[#c7c7cc]">
+                          {s.callCount.toLocaleString()}
+                        </td>
+                        <td className="font-numeric px-4 py-2.5 text-foreground font-medium">
+                          {formatK(s.totalInput + s.totalOutput)}
+                        </td>
+                        <td className="font-numeric px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                          ${s.totalCost.toFixed(4)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : (
+            filteredProjects.length === 0 && !loading ? (
+              <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">Không tìm thấy dự án nào</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/20">
+                      {[
+                        { label: "Dự án",    key: "project",   icon: FolderOpen },
+                        { label: "Platforms", key: "platforms", icon: null },
+                        { label: "Hoạt động", key: "startTime", icon: Clock },
+                        { label: "Calls",    key: "callCount", icon: null },
+                        { label: "Tokens",   key: "tokens",    icon: null },
+                        { label: "Chi phí",  key: "totalCost", icon: null },
+                      ].map(({ label, key, icon: Icon }) => (
+                        <th 
+                          key={key} 
+                          onClick={() => handleSort(key)}
+                          className="text-left px-4 py-3 text-[10px] font-bold text-[#aeaeb2] dark:text-[#6e6e72] uppercase tracking-wide whitespace-nowrap cursor-pointer hover:bg-muted/30 transition-colors"
+                        >
+                          <span className="flex items-center gap-1">
+                            {Icon && <Icon className="w-3 h-3" />}
+                            {label}
+                            <SortIcon field={key} />
+                          </span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredProjects.map((p, i) => (
+                      <tr
+                        key={p.project}
+                        className={`hover:bg-muted/50 transition-colors ${
+                          i < filteredProjects.length - 1 ? "border-b border-border" : ""
+                        }`}
+                      >
+                        <td className="px-4 py-2.5 max-w-40">
+                          <span className="block truncate font-medium text-foreground" title={p.project}>
+                            {p.project}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-1">
+                            {p.sources.map(s => <SourceBadge key={s} source={s} />)}
+                          </div>
+                        </td>
+                        <td className="font-numeric px-4 py-2.5 text-[#8e8e93] dark:text-[#98989d] whitespace-nowrap">
+                          {fmtTime(p.startTime)}
+                        </td>
+                        <td className="font-numeric px-4 py-2.5 text-[#3c3c43] dark:text-[#c7c7cc]">
+                          {p.callCount.toLocaleString()}
+                        </td>
+                        <td className="font-numeric px-4 py-2.5 text-foreground font-medium">
+                          {formatK(p.totalInput + p.totalOutput)}
+                        </td>
+                        <td className="font-numeric px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                          ${p.totalCost.toFixed(4)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
           )}
         </div>
 
