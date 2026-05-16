@@ -34,7 +34,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="vi" className={`${geistMono.variable} ${spaceGrotesk.variable} h-full antialiased`}>
+    <html lang="vi" className={`${geistMono.variable} ${spaceGrotesk.variable} h-full antialiased`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: setInitialTheme }} />
       </head>
