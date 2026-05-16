@@ -215,34 +215,34 @@ function AgentLogo() {
         <path
           d="M4 6C4 4.89543 4.89543 4 6 4H18C19.1046 4 20 4.89543 20 6V18C20 19.1046 19.1046 20 18 20H6C4.89543 20 4 19.1046 4 18V6Z"
           stroke="currentColor"
-          strokeWidth="1.6"
+          strokeWidth="1.2"
           className="opacity-50"
         />
         {/* The Prompt Symbol */}
         <path
-          d="M7 9L9.5 11.5L7 14"
+          d="M7.5 9L9.5 11L7.5 13"
           stroke="currentColor"
-          strokeWidth="2.8"
+          strokeWidth="1.8"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
         {/* The Pulsing Core (The "Eye" of the Agent) */}
         <circle
           cx="14.5"
-          cy="12.5"
-          r="4"
+          cy="12"
+          r="3.2"
           fill="white"
           className="animate-pulse shadow-sm"
         />
         {/* Connection paths to dots */}
-        <path d="M14.5 8.5V7" stroke="white" strokeWidth="1" className="opacity-40" />
-        <path d="M18.5 12.5H20" stroke="white" strokeWidth="1" className="opacity-40" />
-        <path d="M14.5 16.5V18" stroke="white" strokeWidth="1" className="opacity-40" />
+        <path d="M14.5 8.8V7" stroke="white" strokeWidth="0.8" className="opacity-40" />
+        <path d="M17.7 12H19" stroke="white" strokeWidth="0.8" className="opacity-40" />
+        <path d="M14.5 15.2V17" stroke="white" strokeWidth="0.8" className="opacity-40" />
 
         {/* Orbital dots */}
-        <circle cx="14.5" cy="7" r="1.5" fill="white" className="opacity-80" />
-        <circle cx="20" cy="12.5" r="1.5" fill="white" className="opacity-80" />
-        <circle cx="14.5" cy="18" r="1.5" fill="white" className="opacity-80" />
+        <circle cx="14.5" cy="7" r="1.1" fill="white" className="opacity-80" />
+        <circle cx="19" cy="12" r="1.1" fill="white" className="opacity-80" />
+        <circle cx="14.5" cy="17" r="1.1" fill="white" className="opacity-80" />
       </svg>
       
       {/* Inner reflection */}
