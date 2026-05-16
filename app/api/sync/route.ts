@@ -568,8 +568,3 @@ export async function POST() {
   });
 }
 
-codex:  codexNew,
-    gemini: geminiNew,
-  });
-}
-

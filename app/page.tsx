@@ -212,6 +212,28 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchStats(period, source); }, [period, source]);
 
+  // Smart Polling
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetch("/api/sync", { method: "POST" })
+        .then(r => r.json())
+        .then(res => {
+          if (res.synced > 0) {
+            setLastSynced(Date.now());
+            // Fetch silently without setting global loading state
+            const qs = new URLSearchParams({ period, ...(source !== "all" ? { source } : {}) });
+            fetch(`/api/token-stats?${qs}`)
+              .then(r => r.json())
+              .then(setData)
+              .catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }, 5000); // Poll every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [period, source]);
+
   const summary      = data?.summary      ?? EMPTY_SUMMARY;
   const chartData    = data?.chartData    ?? [];
   const sessionStats = data?.sessionStats ?? [];
