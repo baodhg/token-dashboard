@@ -25,11 +25,18 @@ function formatK(n: number) {
 }
 
 const MODEL_COLORS: Record<string, string> = {
-  "Opus 4.7":   "#7c3aed",
-  "Opus 4.5":   "#6d28d9",
-  "Sonnet 4.6": "#4f46e5",
-  "Sonnet 4.5": "#4338ca",
-  "Haiku 4.5":  "#0891b2",
+  "Opus 4.7":        "#7c3aed",
+  "Opus 4.6":        "#8b5cf6",
+  "Opus 4.5":        "#6d28d9",
+  "Sonnet 4.6":      "#4f46e5",
+  "Sonnet 4.5":      "#4338ca",
+  "Haiku 4.5":       "#0891b2",
+  "Flash 3 Preview": "#22d3ee",
+  "Pro 3.1 Preview": "#06b6d4",
+  "Pro 2.5":         "#0891b2",
+  "OpenAI Codex":    "#f59e0b",
+  "GPT-5.3 Codex":   "#fbbf24",
+  "Codex":           "#d97706",
 };
 
 function barColor(label: string) {
@@ -98,7 +105,7 @@ export default function ModelChart({ data }: Props) {
           tick={{ fontSize: 11, fill: "var(--chart-tick-strong)", fontFamily: "inherit" }}
           axisLine={false}
           tickLine={false}
-          width={88}
+          width={110}
         />
         <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--chart-grid)" }} />
         <Bar dataKey="totalTokens" name="Tokens" radius={[0, 4, 4, 0]}>

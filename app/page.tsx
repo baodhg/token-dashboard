@@ -38,7 +38,7 @@ function fmtTime(iso: string) {
 
 /* ─── types ────────────────────────────────────────────── */
 
-type Source = "all" | "claude_code" | "cline" | "codex";
+type Source = "all" | "claude_code" | "cline" | "codex" | "gemini";
 
 interface Summary {
   total: number; totalInput: number; totalOutput: number;
@@ -72,12 +72,14 @@ const SOURCE_LABELS: Record<Source, string> = {
   claude_code:  "Claude Code",
   cline:        "Cline",
   codex:        "Codex",
+  gemini:       "Gemini CLI",
 };
 
 const SOURCE_COLORS: Record<string, string> = {
   claude_code: "#6366f1",
   cline:       "#06b6d4",
   codex:       "#f59e0b",
+  gemini:      "#22d3ee",
 };
 
 /* ─── stat card ────────────────────────────────────────── */
@@ -119,7 +121,7 @@ function SectionHeader({ title, right }: { title: string; right?: React.ReactNod
 
 function SourceBadge({ source }: { source: string }) {
   const color = SOURCE_COLORS[source] ?? "#8e8e93";
-  const label = source === "claude_code" ? "Claude" : source === "cline" ? "Cline" : source === "codex" ? "Codex" : source;
+  const label = source === "claude_code" ? "Claude" : source === "cline" ? "Cline" : source === "codex" ? "Codex" : source === "gemini" ? "Gemini" : source;
   return (
     <span
       className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
@@ -321,7 +323,7 @@ export default function DashboardPage() {
 
         {/* Source filter */}
         <div className="flex items-center gap-2">
-          {(["all", "claude_code", "cline", "codex"] as Source[]).map(s => (
+          {(["all", "claude_code", "cline", "codex", "gemini"] as Source[]).map(s => (
             <button
               key={s}
               onClick={() => setSource(s)}

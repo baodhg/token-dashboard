@@ -397,6 +397,131 @@ async function syncCodexFile(filePath: string, fileName: string): Promise<number
   return toCreate.length;
 }
 
+/* ─── Gemini format ───────────────────────────────────── */
+
+interface GeminiTokens {
+  input?: number;
+  output?: number;
+  cached?: number;
+  thoughts?: number;
+  total?: number;
+}
+
+interface GeminiEntry {
+  id?: string;
+  timestamp?: string;
+  type?: string;
+  tokens?: GeminiTokens;
+  model?: string;
+}
+
+async function syncGeminiSessions(): Promise<number> {
+  const geminiDir = join(homedir(), ".gemini", "tmp");
+
+  let projects: string[];
+  try {
+    projects = await readdir(geminiDir);
+  } catch {
+    return 0;
+  }
+
+  let totalNew = 0;
+
+  for (const proj of projects) {
+    const chatsDir = join(geminiDir, proj, "chats");
+    let s: Awaited<ReturnType<typeof stat>>;
+    try { s = await stat(chatsDir); } catch { continue; }
+    if (!s.isDirectory()) continue;
+
+    let files: string[];
+    try {
+      files = (await readdir(chatsDir)).filter(f => f.endsWith(".jsonl"));
+    } catch { continue; }
+
+    for (const file of files) {
+      const filePath = join(chatsDir, file);
+      try {
+        totalNew += await syncGeminiFile(filePath, proj);
+      } catch { /* skip unreadable */ }
+    }
+  }
+
+  return totalNew;
+}
+
+async function syncGeminiFile(filePath: string, projectName: string): Promise<number> {
+  const fileStat = await stat(filePath);
+  const currentSize = BigInt(fileStat.size);
+
+  const syncKey = `gemini:${filePath}`;
+  const state = await prisma.syncState.findUnique({ where: { filePath: syncKey } });
+  const lastSize = state?.lastSize ?? BigInt(0);
+
+  if (currentSize <= lastSize) return 0;
+
+  const fh = await (await import("fs/promises")).open(filePath, "r");
+  const newBytes = Number(currentSize - lastSize);
+  const buf = Buffer.alloc(newBytes);
+  await fh.read(buf, 0, newBytes, Number(lastSize));
+  await fh.close();
+
+  const lines = buf.toString("utf-8").split("\n");
+  const toCreate: { id: string; model: string; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number; timestamp: Date; sessionId: string; project: string | null; source: string }[] = [];
+  const seen = new Set<string>();
+
+  // For sessionId, we can try to extract it from the first line or filename
+  let sessionId = "unknown";
+
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let entry: GeminiEntry & { sessionId?: string };
+    try { entry = JSON.parse(line); } catch { continue; }
+
+    if (entry.sessionId) {
+      sessionId = entry.sessionId;
+      continue;
+    }
+
+    if (entry.type !== "gemini") continue;
+    if (!entry.tokens || !entry.timestamp || !entry.id) continue;
+
+    const u = entry.tokens;
+    const model = entry.model ?? "gemini";
+    const input  = u.input  ?? 0;
+    const output = (u.output ?? 0) + (u.thoughts ?? 0);
+    const cache  = u.cached  ?? 0;
+
+    const id = `gemini_${entry.id}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+
+    toCreate.push({
+      id,
+      model,
+      inputTokens:  input,
+      outputTokens: output,
+      cacheTokens:  cache,
+      cost:         0, // Typically free or different pricing for Gemini CLI
+      timestamp:    new Date(entry.timestamp),
+      sessionId:    `gemini_${sessionId}`,
+      project:      projectName,
+      source:       "gemini",
+    });
+  }
+
+  if (toCreate.length > 0) {
+    await prisma.call.createMany({ data: toCreate, skipDuplicates: true });
+  }
+
+  await prisma.syncState.upsert({
+    where:  { filePath: syncKey },
+    update: { lastSize: currentSize },
+    create: { filePath: syncKey, lastSize: currentSize },
+  });
+
+  return toCreate.length;
+}
+
 /* ─── POST handler ────────────────────────────────────── */
 
 export async function POST() {
@@ -431,11 +556,14 @@ export async function POST() {
 
   const clineNew  = await syncClineTasks();
   const codexNew  = await syncCodexSessions();
+  const geminiNew = await syncGeminiSessions();
 
   return Response.json({
-    synced: claudeNew + clineNew + codexNew,
+    synced: claudeNew + clineNew + codexNew + geminiNew,
     claude: claudeNew,
     cline:  clineNew,
     codex:  codexNew,
+    gemini: geminiNew,
   });
 }
+

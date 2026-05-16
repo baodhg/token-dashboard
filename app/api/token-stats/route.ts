@@ -13,11 +13,18 @@ const PERIOD_MS: Record<Period, number> = {
 
 const MODEL_LABEL: Record<string, string> = {
   "claude-opus-4-7":           "Opus 4.7",
+  "claude-opus-4-6":           "Opus 4.6",
   "claude-opus-4-5":           "Opus 4.5",
   "claude-sonnet-4-6":         "Sonnet 4.6",
   "claude-sonnet-4-5":         "Sonnet 4.5",
   "claude-haiku-4-5":          "Haiku 4.5",
   "claude-haiku-4-5-20251001": "Haiku 4.5",
+  "gemini-3-flash-preview":    "Flash 3 Preview",
+  "gemini-3.1-pro-preview":    "Pro 3.1 Preview",
+  "gemini-2.5-pro":            "Pro 2.5",
+  "openai/codex":              "OpenAI Codex",
+  "cx/gpt-5.3-codex-xhigh":    "GPT-5.3 Codex",
+  "codex":                     "Codex",
 };
 
 function modelLabel(model: string) {
