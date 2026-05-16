@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import {
   Zap, ArrowDownLeft, ArrowUpRight, DollarSign,
-  RefreshCw, Database, Clock, FolderOpen, Sun, Moon,
+  RefreshCw, Database, Clock, FolderOpen, Sun, Moon, Laptop
 } from "lucide-react";
 import { PERIODS, type Period, type DataPoint } from "@/lib/mock-data";
 import type { ModelStat } from "@/components/ModelChart";
@@ -319,9 +319,7 @@ export default function DashboardPage() {
               aria-label="Toggle theme"
               className="w-8 h-8 rounded-full bg-muted hover:bg-muted/70 flex items-center justify-center text-[#3c3c43] dark:text-[#c7c7cc] transition-colors cursor-pointer"
             >
-              {theme === "dark"
-                ? <Sun className="w-3.5 h-3.5" />
-                : <Moon className="w-3.5 h-3.5" />}
+              {theme === "light" ? <Sun className="w-3.5 h-3.5" /> : theme === "dark" ? <Moon className="w-3.5 h-3.5" /> : <Laptop className="w-3.5 h-3.5" />}
             </button>
 
             <button
