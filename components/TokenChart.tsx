@@ -5,6 +5,7 @@ import {
   Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import type { DataPoint, Period } from "@/lib/mock-data";
+import { useI18n } from "@/lib/i18n-context";
 
 interface Props {
   data: DataPoint[];
@@ -65,6 +66,7 @@ function getInterval(p: Period, len: number) {
 }
 
 export default function TokenChart({ data, period }: Props) {
+  const { t } = useI18n();
   const maxVal = Math.max(...data.map(d => d.input + d.output), 1);
   const ticks = Array.from({ length: 5 }, (_, i) => Math.round((maxVal / 4) * i));
 
@@ -100,7 +102,7 @@ export default function TokenChart({ data, period }: Props) {
         <Line
           type="linear"
           dataKey="input"
-          name="Input"
+          name={t("common.input")}
           stroke="#6366f1"
           strokeWidth={2}
           dot={false}
@@ -109,7 +111,7 @@ export default function TokenChart({ data, period }: Props) {
         <Line
           type="linear"
           dataKey="output"
-          name="Output"
+          name={t("common.output")}
           stroke="#a855f7"
           strokeWidth={2}
           dot={false}

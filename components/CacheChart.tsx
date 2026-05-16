@@ -5,6 +5,7 @@ import {
   Tooltip, ResponsiveContainer,
 } from "recharts";
 import type { DataPoint, Period } from "@/lib/mock-data";
+import { useI18n } from "@/lib/i18n-context";
 
 interface Props {
   data: DataPoint[];
@@ -19,6 +20,7 @@ function formatK(n: number) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CustomTooltip({ active, payload, label }: any) {
+  const { t } = useI18n();
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-card rounded-xl shadow-lg border border-border px-4 py-3 text-sm min-w-35">
@@ -26,7 +28,7 @@ function CustomTooltip({ active, payload, label }: any) {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-1.5 text-[#3c3c43] dark:text-[#c7c7cc]">
           <span className="w-2 h-2 rounded-full shrink-0 bg-cyan-500" />
-          <span className="text-[11px]">Cache read</span>
+          <span className="text-[11px]">{t("common.cache_read")}</span>
         </div>
         <span className="font-numeric text-[12px] font-semibold text-foreground">
           {formatK(payload[0].value)}
@@ -51,14 +53,15 @@ function getInterval(p: Period, len: number) {
 }
 
 export default function CacheChart({ data, period }: Props) {
+  const { t } = useI18n();
   const needsAngle = period === "1m" || period === "1d" || (period === "custom" && data.length > 7);
 
   return (
-    <ResponsiveContainer width="100%" height={208}>
+    <ResponsiveContainer width="100%" height={256}>
       <BarChart
         data={data}
         margin={{ top: 4, right: 8, left: 4, bottom: needsAngle ? 16 : 0 }}
-        barSize={period === "1d" ? 8 : period === "1m" ? 6 : 16}
+        barSize={period === "1d" ? 16 : period === "1m" ? 12 : 28}
       >
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
         <XAxis
@@ -82,7 +85,7 @@ export default function CacheChart({ data, period }: Props) {
           width={56}
         />
         <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(6,182,212,0.06)" }} />
-        <Bar dataKey="cache" name="Cache read" fill="#06b6d4" radius={[3, 3, 0, 0]} />
+        <Bar dataKey="cache" name={t("common.cache_read")} fill="#06b6d4" radius={[3, 3, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );

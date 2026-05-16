@@ -31,7 +31,7 @@ function formatK(n: number) {
 }
 
 function fmtTime(iso: string, locale: string) {
-  if (!iso) return "â€”";
+  if (!iso) return "-";
   return new Date(iso).toLocaleString(locale === "vi" ? "vi-VN" : "en-US", {
     day: "2-digit", month: "2-digit",
     hour: "2-digit", minute: "2-digit",
@@ -90,10 +90,10 @@ const SOURCE_LABELS: Record<Source, string> = {
 };
 
 const SOURCE_COLORS: Record<string, string> = {
-  claude_code: "#6366f1",
-  cline:       "#06b6d4",
-  codex:       "#f59e0b",
-  gemini:      "#22d3ee",
+  claude_code: "#D4845A",
+  cline:       "#5A6370",
+  codex:       "#7B6CF6",
+  gemini:      "#4285F4",
 };
 
 /* â”€â”€â”€ stat card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -140,10 +140,10 @@ function SourceBadge({ source }: { source: string }) {
   const label = source === "claude_code" ? "Claude" : source === "cline" ? "Cline" : source === "codex" ? "Codex" : source === "gemini" ? "Gemini" : source;
   
   let iconSrc = null;
-  if (source === "gemini") iconSrc = "/gemini.svg";
-  else if (source === "claude_code") iconSrc = "/claude.svg";
-  else if (source === "cline") iconSrc = "/cline.svg";
-  else if (source === "codex") iconSrc = "/codex.svg";
+  if (source === "gemini") iconSrc = "/geminicli.png";
+  else if (source === "claude_code") iconSrc = "/claude.png";
+  else if (source === "cline") iconSrc = "/cline.png";
+  else if (source === "codex") iconSrc = "/codex.png";
 
   return (
     <span
@@ -151,7 +151,7 @@ function SourceBadge({ source }: { source: string }) {
       style={{ background: `${color}10`, color, borderColor: `${color}30` }}
     >
       {iconSrc ? (
-        <Image src={iconSrc} alt={label} width={10} height={10} style={{ color }} className="opacity-90" />
+        <Image src={iconSrc} alt={label} width={12} height={12} className="opacity-90" style={{ width: 12, height: 12, objectFit: "contain" }} />
       ) : (
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
       )}
@@ -261,7 +261,7 @@ function AgentLogo() {
       
       {/* Inner reflection */}
       <div className="absolute inset-0 rounded-xl bg-linear-to-t from-black/10 to-transparent" />
-      <div className="absolute top-0 left-0 right-0 h-[1px] bg-white/30 rounded-t-xl" />
+      <div className="absolute top-0 left-0 right-0 h-px bg-white/30 rounded-t-xl" />
     </div>
   );
 }
@@ -419,13 +419,13 @@ export default function DashboardPage() {
   };
 
   const pct = (n: number) =>
-    summary.total > 0 ? `${((n / summary.total) * 100).toFixed(0)}%` : "â€”";
+    summary.total > 0 ? `${((n / summary.total) * 100).toFixed(0)}%` : "0%";
 
   const statCards = [
     {
-      label: "Tá»•ng tokens",
+      label: t("common.total_tokens"),
       value: formatK(summary.total),
-      sub:   `${summary.callCount.toLocaleString()} lÆ°á»£t gá»i`,
+      sub:   `${summary.callCount.toLocaleString()} ${t("common.calls")}`,
       icon: Zap,
       iconBg: "bg-indigo-50 dark:bg-indigo-500/15",
       iconColor: "text-indigo-600 dark:text-indigo-400",
@@ -433,7 +433,7 @@ export default function DashboardPage() {
     {
       label: t("common.input_tokens"),
       value: formatK(summary.totalInput),
-      sub:   `${pct(summary.totalInput)} tá»•ng`,
+      sub:   `${pct(summary.totalInput)} ${t("common.total")}`,
       icon: ArrowDownLeft,
       iconBg: "bg-purple-50 dark:bg-purple-500/15",
       iconColor: "text-purple-600 dark:text-purple-400",
@@ -441,15 +441,15 @@ export default function DashboardPage() {
     {
       label: t("common.output_tokens"),
       value: formatK(summary.totalOutput),
-      sub:   `${pct(summary.totalOutput)} tá»•ng`,
+      sub:   `${pct(summary.totalOutput)} ${t("common.total")}`,
       icon: ArrowUpRight,
       iconBg: "bg-violet-50 dark:bg-violet-500/15",
       iconColor: "text-violet-600 dark:text-violet-400",
     },
     {
-      label: "Chi phÃ­ Æ°á»›c tÃ­nh",
+      label: t("common.estimated_cost"),
       value: `$${summary.totalCost.toFixed(4)}`,
-      sub:   "GiÃ¡ tham kháº£o",
+      sub:   t("common.reference_price"),
       icon: DollarSign,
       iconBg: "bg-emerald-50 dark:bg-emerald-500/15",
       iconColor: "text-emerald-600 dark:text-emerald-400",
@@ -523,10 +523,10 @@ export default function DashboardPage() {
             >
               <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
               {syncing
-                ? "Äang syncâ€¦"
+                ? t("common.syncing")
                 : lastSynced
-                  ? new Date(lastSynced).toLocaleTimeString("vi-VN")
-                  : "Sync"}
+                  ? new Date(lastSynced).toLocaleTimeString(locale === "vi" ? "vi-VN" : "en-US")
+                  : t("common.sync")}
             </button>
           </div>
         </div>
@@ -565,39 +565,15 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* Platform breakdown (only when "all" selected and has multi-source data) */}
-        {source === "all" && platformStats.length > 1 && (
-          <div className="bg-card rounded-2xl p-5 border border-border shadow-sm">
-            <SectionHeader title="Platforms" />
-            <PlatformCards
-              platforms={platformStats}
-              total={platformStats.reduce((s, p) => s + p.totalTokens, 0)}
-              loading={loading}
-            />
-          </div>
-        )}
-
-        {/* Row 2: Input / Output line chart */}
-        <div className="bg-card rounded-2xl p-5 border border-border shadow-sm">
-          <SectionHeader title={t("common.input_output")} />
-          {loading ? (
-            <div className="h-64 flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Äang táº£iâ€¦</div>
-          ) : chartEmpty ? (
-            <div className="h-64 flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">KhÃ´ng cÃ³ dá»¯ liá»‡u</div>
-          ) : (
-            <TokenChart data={chartData} period={period} />
-          )}
-        </div>
-
-        {/* Row 3: Cache read bar chart + Tokens theo model */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-          <div className="lg:col-span-3 bg-card rounded-2xl p-5 border border-border shadow-sm">
+        {/* Row 2: Cache read bar chart + Tokens theo model */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <div className="lg:col-span-1 bg-card rounded-2xl p-5 border border-border shadow-sm">
             <SectionHeader title={t("common.cache_read")} />
-            <div className="h-52">
+            <div className="h-64">
               {loading ? (
-                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Äang táº£iâ€¦</div>
+                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">{t("common.loading")}</div>
               ) : chartEmpty ? (
-                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">KhÃ´ng cÃ³ dá»¯ liá»‡u</div>
+                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">{t("common.no_data")}</div>
               ) : (
                 <CacheChart data={chartData} period={period} />
               )}
@@ -606,14 +582,26 @@ export default function DashboardPage() {
 
           <div className="lg:col-span-2 bg-card rounded-2xl p-5 border border-border shadow-sm">
             <SectionHeader title={t("common.tokens_by_model")} />
-            <div className="h-52">
+            <div className="h-64 overflow-y-auto pr-2 custom-scrollbar">
               {loading ? (
-                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">Äang táº£iâ€¦</div>
+                <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">{t("common.loading")}</div>
               ) : (
                 <ModelChart data={modelStats} />
               )}
             </div>
           </div>
+        </div>
+
+        {/* Row 3: Input / Output line chart */}
+        <div className="bg-card rounded-2xl p-5 border border-border shadow-sm">
+          <SectionHeader title={t("common.input_output")} />
+          {loading ? (
+            <div className="h-64 flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">{t("common.loading")}</div>
+          ) : chartEmpty ? (
+            <div className="h-64 flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">{t("common.no_data")}</div>
+          ) : (
+            <TokenChart data={chartData} period={period} />
+          )}
         </div>
 
         {/* Row 4: Sessions / Projects table */}
@@ -628,7 +616,7 @@ export default function DashboardPage() {
                     : "text-[#8e8e93] hover:text-foreground"
                 }`}
               >
-                Sessions gáº§n nháº¥t
+                {t("common.recent_sessions")}
               </button>
               <button
                 onClick={() => setViewMode("projects")}
@@ -638,7 +626,7 @@ export default function DashboardPage() {
                     : "text-[#8e8e93] hover:text-foreground"
                 }`}
               >
-                Thá»‘ng kÃª theo dá»± Ã¡n
+                {t("common.project_stats")}
               </button>
             </div>
 
@@ -648,7 +636,7 @@ export default function DashboardPage() {
                   <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#8e8e93]" />
                   <input
                     type="text"
-                    placeholder="TÃ¬m tÃªn dá»± Ã¡n..."
+                    placeholder={t("common.search_project")}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-9 pr-4 py-1.5 bg-muted/50 border border-transparent focus:border-border rounded-xl text-[12px] outline-none w-48 sm:w-64 transition-all"
@@ -656,26 +644,28 @@ export default function DashboardPage() {
                 </div>
               )}
               <span className="text-[11px] text-[#aeaeb2] dark:text-[#6e6e72] whitespace-nowrap">
-                {viewMode === "sessions" ? `${sessionStats.length} sessions` : `${filteredProjects.length} dá»± Ã¡n`}
+                {viewMode === "sessions" 
+                  ? `${sessionStats.length} ${t("common.sessions")}` 
+                  : `${filteredProjects.length} ${t("common.projects")}`}
               </span>
             </div>
           </div>
 
           {viewMode === "sessions" ? (
             sessionStats.length === 0 && !loading ? (
-              <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">KhÃ´ng cÃ³ dá»¯ liá»‡u</div>
+              <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">{t("common.no_data")}</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-[12px]">
                   <thead>
                     <tr className="border-b border-border bg-muted/20">
                       {[
-                        { label: "Platform", icon: null,      key: "source" },
-                        { label: "Dá»± Ã¡n",    icon: FolderOpen, key: "project" },
-                        { label: "Báº¯t Ä‘áº§u",  icon: Clock,      key: "startTime" },
-                        { label: "Calls",    icon: null,       key: "callCount" },
-                        { label: "Tokens",   icon: null,       key: "tokens" },
-                        { label: "Chi phÃ­",  icon: null,       key: "totalCost" },
+                        { label: t("common.platform"), icon: null,      key: "source" },
+                        { label: t("common.project"),    icon: FolderOpen, key: "project" },
+                        { label: t("common.start_time"),  icon: Clock,      key: "startTime" },
+                        { label: t("common.calls"),    icon: null,       key: "callCount" },
+                        { label: t("common.tokens"),   icon: null,       key: "tokens" },
+                        { label: t("common.cost"),  icon: null,       key: "totalCost" },
                       ].map(({ label, icon: Icon }) => (
                         <th key={label} className="text-left px-4 py-3 text-[10px] font-bold text-[#aeaeb2] dark:text-[#6e6e72] uppercase tracking-wide whitespace-nowrap">
                           <span className="flex items-center gap-1">
@@ -721,19 +711,19 @@ export default function DashboardPage() {
             )
           ) : (
             filteredProjects.length === 0 && !loading ? (
-              <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">KhÃ´ng tÃ¬m tháº¥y dá»± Ã¡n nÃ o</div>
+              <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">{t("common.no_projects_found")}</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-[12px]">
                   <thead>
                     <tr className="border-b border-border bg-muted/20">
                       {[
-                        { label: "Dá»± Ã¡n",    key: "project",   icon: FolderOpen },
-                        { label: "Platforms", key: "platforms", icon: null },
-                        { label: "Hoáº¡t Ä‘á»™ng", key: "startTime", icon: Clock },
-                        { label: "Calls",    key: "callCount", icon: null },
-                        { label: "Tokens",   key: "tokens",    icon: null },
-                        { label: "Chi phÃ­",  key: "totalCost", icon: null },
+                        { label: t("common.project"),    key: "project",   icon: FolderOpen },
+                        { label: t("common.platforms"), key: "platforms", icon: null },
+                        { label: t("common.activity"), key: "startTime", icon: Clock },
+                        { label: t("common.calls"),    key: "callCount", icon: null },
+                        { label: t("common.tokens"),   key: "tokens",    icon: null },
+                        { label: t("common.cost"),  key: "totalCost", icon: null },
                       ].map(({ label, key, icon: Icon }) => (
                         <th 
                           key={key} 
@@ -742,7 +732,7 @@ export default function DashboardPage() {
                         >
                           <span className="flex items-center gap-1">
                             {Icon && <Icon className="w-3 h-3" />}
-                            {t(`periods.${key}`)} <SortIcon field={key} />
+                            {label} <SortIcon field={key} />
                           </span>
                         </th>
                       ))}

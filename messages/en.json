@@ -24,7 +24,12 @@
     "start_time": "Start Time",
     "activity": "Activity",
     "tokens": "Tokens",
-    "cost": "Cost"
+    "cost": "Cost",
+    "sessions": "sessions",
+    "projects": "projects",
+    "platform": "Platform",
+    "input": "Input",
+    "output": "Output"
   },
   "periods": {
     "1d": "Today",

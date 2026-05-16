@@ -24,7 +24,12 @@
     "start_time": "Bắt đầu",
     "activity": "Hoạt động",
     "tokens": "Tokens",
-    "cost": "Chi phí"
+    "cost": "Chi phí",
+    "sessions": "sessions",
+    "projects": "dự án",
+    "platform": "Platform",
+    "input": "Input",
+    "output": "Output"
   },
   "periods": {
     "1d": "Hôm nay",

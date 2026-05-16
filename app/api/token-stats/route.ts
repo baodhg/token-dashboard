@@ -204,7 +204,7 @@ export async function GET(request: NextRequest) {
     }),
 
     prisma.call.groupBy({
-      by: ["model"],
+      by: ["model", "source"],
       where,
       _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
       _count: { id: true },
@@ -278,6 +278,7 @@ export async function GET(request: NextRequest) {
 
   const modelStats = rawModels.map(m => ({
     model:       m.model,
+    source:      m.source,
     label:       modelLabel(m.model),
     callCount:   m._count.id,
     totalInput:  m._sum.inputTokens  ?? 0,
