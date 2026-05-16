@@ -42,9 +42,10 @@ async function syncClaudeFile(filePath: string, projectName: string) {
   const currentSize = BigInt(fileStat.size);
 
   const state = await prisma.syncState.findUnique({ where: { filePath } });
-  const lastSize = state?.lastSize ?? BigInt(0);
+  let lastSize = state?.lastSize ?? BigInt(0);
 
-  if (currentSize <= lastSize) return 0;
+  if (currentSize < lastSize) lastSize = BigInt(0);
+  if (currentSize === lastSize) return 0;
 
   const fh = await (await import("fs/promises")).open(filePath, "r");
   const newBytes = Number(currentSize - lastSize);
@@ -168,7 +169,7 @@ async function syncClineTasks(): Promise<number> {
 
     const syncKey = `cline:${taskId}`;
     const state = await prisma.syncState.findUnique({ where: { filePath: syncKey } });
-    if (state && state.lastSize >= currentSize) continue;
+    if (state && state.lastSize === currentSize) continue;
 
     // read model info from metadata
     let modelUsage: ClineModelUsage[] = [];
@@ -563,6 +564,11 @@ export async function POST() {
     claude: claudeNew,
     cline:  clineNew,
     codex:  codexNew,
+    gemini: geminiNew,
+  });
+}
+
+codex:  codexNew,
     gemini: geminiNew,
   });
 }
