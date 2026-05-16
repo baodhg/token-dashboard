@@ -17,9 +17,11 @@ model Call {
   timestamp    DateTime
   sessionId    String?
   project      String?
+  source       String   @default("claude_code")
 
   @@index([timestamp])
   @@index([model])
+  @@index([source])
   @@map("calls")
 }
 

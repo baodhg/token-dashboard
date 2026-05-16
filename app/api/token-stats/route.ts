@@ -84,8 +84,8 @@ function buildChartData(
   return buckets;
 }
 
-function cleanProject(project: string | null): string {
-  if (!project) return "Unknown";
+function cleanProject(project: string | null, source: string): string {
+  if (!project) return source === "cline" ? "Cline" : "Unknown";
   const prefix = "c--users-admin-desktop-";
   if (project.toLowerCase().startsWith(prefix)) return project.slice(prefix.length);
   return project;
@@ -94,24 +94,30 @@ function cleanProject(project: string | null): string {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const period = (searchParams.get("period") ?? "1w") as Period;
+  const sourceFilter = searchParams.get("source") ?? "all";
   const now = Date.now();
   const since = new Date(now - PERIOD_MS[period]);
 
-  const [rows, agg, rawSessions, rawModels] = await Promise.all([
+  const where = {
+    timestamp: { gte: since },
+    ...(sourceFilter !== "all" ? { source: sourceFilter } : {}),
+  };
+
+  const [rows, agg, rawSessions, rawModels, rawPlatforms] = await Promise.all([
     prisma.call.findMany({
-      where: { timestamp: { gte: since } },
+      where,
       select: { inputTokens: true, outputTokens: true, cacheTokens: true, timestamp: true },
     }),
 
     prisma.call.aggregate({
-      where: { timestamp: { gte: since } },
+      where,
       _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
       _count: { id: true },
     }),
 
     prisma.call.groupBy({
-      by: ["sessionId", "project"],
-      where: { timestamp: { gte: since } },
+      by: ["sessionId", "project", "source"],
+      where,
       _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
       _min: { timestamp: true },
       _count: { id: true },
@@ -121,10 +127,17 @@ export async function GET(request: NextRequest) {
 
     prisma.call.groupBy({
       by: ["model"],
-      where: { timestamp: { gte: since } },
+      where,
       _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
       _count: { id: true },
       orderBy: [{ _sum: { inputTokens: "desc" } }],
+    }),
+
+    prisma.call.groupBy({
+      by: ["source"],
+      where: { timestamp: { gte: since } }, // always all sources for platform overview
+      _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
+      _count: { id: true },
     }),
   ]);
 
@@ -141,7 +154,8 @@ export async function GET(request: NextRequest) {
 
   const sessionStats = rawSessions.map(s => ({
     sessionId:   s.sessionId,
-    project:     cleanProject(s.project),
+    project:     cleanProject(s.project, s.source),
+    source:      s.source,
     startTime:   s._min.timestamp?.toISOString() ?? "",
     callCount:   s._count.id,
     totalInput:  s._sum.inputTokens  ?? 0,
@@ -161,5 +175,16 @@ export async function GET(request: NextRequest) {
     totalTokens: (m._sum.inputTokens ?? 0) + (m._sum.outputTokens ?? 0),
   }));
 
-  return Response.json({ chartData, summary, sessionStats, modelStats });
+  const platformStats = rawPlatforms.map(p => ({
+    source:      p.source,
+    label:       p.source === "claude_code" ? "Claude Code" : p.source === "cline" ? "Cline" : p.source,
+    callCount:   p._count.id,
+    totalInput:  p._sum.inputTokens  ?? 0,
+    totalOutput: p._sum.outputTokens ?? 0,
+    totalCache:  p._sum.cacheTokens  ?? 0,
+    totalCost:   p._sum.cost         ?? 0,
+    totalTokens: (p._sum.inputTokens ?? 0) + (p._sum.outputTokens ?? 0),
+  }));
+
+  return Response.json({ chartData, summary, sessionStats, modelStats, platformStats });
 }

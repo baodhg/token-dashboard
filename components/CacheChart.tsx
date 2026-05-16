@@ -49,7 +49,7 @@ export default function CacheChart({ data, period }: Props) {
   const needsAngle = period === "1m" || period === "1d";
 
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <ResponsiveContainer width="100%" height={208}>
       <BarChart
         data={data}
         margin={{ top: 4, right: 8, left: 4, bottom: needsAngle ? 16 : 0 }}

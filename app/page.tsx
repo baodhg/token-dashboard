@@ -22,8 +22,9 @@ const ModelChart = dynamic<{ data: ModelStat[] }>(
 /* ─── helpers ─────────────────────────────────────────── */
 
 function formatK(n: number) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000)     return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000)         return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
 
@@ -37,25 +38,46 @@ function fmtTime(iso: string) {
 
 /* ─── types ────────────────────────────────────────────── */
 
+type Source = "all" | "claude_code" | "cline" | "codex";
+
 interface Summary {
   total: number; totalInput: number; totalOutput: number;
   totalCache: number; totalCost: number; callCount: number;
 }
 interface SessionStat {
-  sessionId: string | null; project: string; startTime: string;
+  sessionId: string | null; project: string; source: string; startTime: string;
   callCount: number; totalInput: number; totalOutput: number;
   totalCache: number; totalCost: number;
 }
+interface PlatformStat {
+  source: string; label: string;
+  callCount: number; totalInput: number; totalOutput: number;
+  totalCache: number; totalCost: number; totalTokens: number;
+}
 interface ApiData {
-  chartData:    DataPoint[];
-  summary:      Summary;
-  sessionStats: SessionStat[];
-  modelStats:   ModelStat[];
+  chartData:     DataPoint[];
+  summary:       Summary;
+  sessionStats:  SessionStat[];
+  modelStats:    ModelStat[];
+  platformStats: PlatformStat[];
 }
 
 const EMPTY_SUMMARY: Summary = {
   total: 0, totalInput: 0, totalOutput: 0,
   totalCache: 0, totalCost: 0, callCount: 0,
+};
+
+const SOURCE_LABELS: Record<Source, string> = {
+  all:          "Tất cả",
+  claude_code:  "Claude Code",
+  cline:        "Cline",
+  codex:        "Codex",
+};
+
+const SOURCE_COLORS: Record<string, string> = {
+  claude_code: "#6366f1",
+  cline:       "#06b6d4",
+  codex:       "#f59e0b",
 };
 
 /* ─── stat card ────────────────────────────────────────── */
@@ -93,15 +115,69 @@ function SectionHeader({ title, right }: { title: string; right?: React.ReactNod
   );
 }
 
+/* ─── platform badge ───────────────────────────────────── */
+
+function SourceBadge({ source }: { source: string }) {
+  const color = SOURCE_COLORS[source] ?? "#8e8e93";
+  const label = source === "claude_code" ? "Claude" : source === "cline" ? "Cline" : source === "codex" ? "Codex" : source;
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+      style={{ background: `${color}18`, color }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+      {label}
+    </span>
+  );
+}
+
+/* ─── platform overview cards ──────────────────────────── */
+
+function PlatformCards({ platforms, total, loading }: {
+  platforms: PlatformStat[]; total: number; loading: boolean;
+}) {
+  if (loading) return null;
+  if (platforms.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {platforms.map(p => {
+        const color = SOURCE_COLORS[p.source] ?? "#8e8e93";
+        const pct = total > 0 ? Math.round((p.totalTokens / total) * 100) : 0;
+        const barWidth = total > 0 ? (p.totalTokens / total) * 100 : 0;
+        return (
+          <div key={p.source} className="bg-muted/50 rounded-xl p-4 flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] font-semibold text-foreground">{p.label}</span>
+              <span className="font-numeric text-[11px] text-[#8e8e93] dark:text-[#98989d]">{pct}%</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-border overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{ width: `${barWidth}%`, background: color }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-[#8e8e93] dark:text-[#98989d]">
+              <span className="font-numeric">{formatK(p.totalTokens)} tokens</span>
+              <span className="font-numeric text-emerald-600 dark:text-emerald-400 font-semibold">${p.totalCost.toFixed(4)}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─── page ─────────────────────────────────────────────── */
 
 export default function DashboardPage() {
-  const [period, setPeriod]     = useState<Period>("1w");
-  const [data, setData]         = useState<ApiData | null>(null);
-  const [loading, setLoading]   = useState(true);
-  const [syncing, setSyncing]   = useState(false);
+  const [period, setPeriod]       = useState<Period>("1w");
+  const [source, setSource]       = useState<Source>("all");
+  const [data, setData]           = useState<ApiData | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [syncing, setSyncing]     = useState(false);
   const [lastSynced, setLastSynced] = useState<number | null>(null);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme]         = useState<"light" | "dark">("light");
 
   useEffect(() => {
     const isDark = document.documentElement.classList.contains("dark");
@@ -115,9 +191,10 @@ export default function DashboardPage() {
     try { localStorage.setItem("theme", next); } catch {}
   };
 
-  const fetchStats = (p: Period) => {
+  const fetchStats = (p: Period, s: Source) => {
     setLoading(true);
-    fetch(`/api/token-stats?period=${p}`)
+    const qs = new URLSearchParams({ period: p, ...(s !== "all" ? { source: s } : {}) });
+    fetch(`/api/token-stats?${qs}`)
       .then(r => r.json())
       .then(setData)
       .catch(() => setData(null))
@@ -127,16 +204,17 @@ export default function DashboardPage() {
   const handleSync = () => {
     setSyncing(true);
     fetch("/api/sync", { method: "POST" })
-      .then(() => { setLastSynced(Date.now()); fetchStats(period); })
+      .then(() => { setLastSynced(Date.now()); fetchStats(period, source); })
       .finally(() => setSyncing(false));
   };
 
-  useEffect(() => { fetchStats(period); }, [period]);
+  useEffect(() => { fetchStats(period, source); }, [period, source]);
 
   const summary      = data?.summary      ?? EMPTY_SUMMARY;
   const chartData    = data?.chartData    ?? [];
   const sessionStats = data?.sessionStats ?? [];
   const modelStats   = data?.modelStats   ?? [];
+  const platformStats = data?.platformStats ?? [];
 
   const pct = (n: number) =>
     summary.total > 0 ? `${((n / summary.total) * 100).toFixed(0)}%` : "—";
@@ -241,12 +319,47 @@ export default function DashboardPage() {
       {/* ── Main ── */}
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-5">
 
+        {/* Source filter */}
+        <div className="flex items-center gap-2">
+          {(["all", "claude_code", "cline", "codex"] as Source[]).map(s => (
+            <button
+              key={s}
+              onClick={() => setSource(s)}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-all cursor-pointer border ${
+                source === s
+                  ? "bg-foreground text-background border-foreground shadow-sm"
+                  : "border-border text-[#3c3c43] dark:text-[#c7c7cc] hover:bg-muted"
+              }`}
+            >
+              {s !== "all" && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full"
+                  style={{ background: source === s ? "currentColor" : SOURCE_COLORS[s] }}
+                />
+              )}
+              {SOURCE_LABELS[s]}
+            </button>
+          ))}
+        </div>
+
         {/* Row 1: Stat cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {statCards.map(s => (
             <StatCard key={s.label} {...s} loading={loading} />
           ))}
         </div>
+
+        {/* Platform breakdown (only when "all" selected and has multi-source data) */}
+        {source === "all" && platformStats.length > 1 && (
+          <div className="bg-card rounded-2xl p-5 border border-border shadow-sm">
+            <SectionHeader title="Platforms" />
+            <PlatformCards
+              platforms={platformStats}
+              total={platformStats.reduce((s, p) => s + p.totalTokens, 0)}
+              loading={loading}
+            />
+          </div>
+        )}
 
         {/* Row 2: Input / Output line chart */}
         <div className="bg-card rounded-2xl p-5 border border-border shadow-sm">
@@ -304,6 +417,7 @@ export default function DashboardPage() {
                 <thead>
                   <tr className="border-b border-border">
                     {[
+                      { label: "Platform", icon: null      },
                       { label: "Dự án",   icon: FolderOpen },
                       { label: "Bắt đầu", icon: Clock      },
                       { label: "Calls",   icon: null       },
@@ -327,6 +441,9 @@ export default function DashboardPage() {
                         i < sessionStats.length - 1 ? "border-b border-border" : ""
                       }`}
                     >
+                      <td className="px-4 py-2.5">
+                        <SourceBadge source={s.source} />
+                      </td>
                       <td className="px-4 py-2.5 max-w-35">
                         <span className="block truncate font-medium text-foreground" title={s.project}>
                           {s.project}
