@@ -196,6 +196,56 @@ function PlatformCards({ platforms, total, loading }: {
   );
 }
 
+/* ─── agent logo ───────────────────────────────────────── */
+
+function AgentLogo() {
+  return (
+    <div className="relative w-7 h-7 flex items-center justify-center shrink-0">
+      {/* Background Glow */}
+      <div className="absolute inset-0 bg-linear-to-br from-indigo-500 to-purple-600 rounded-lg shadow-sm" />
+      
+      {/* Custom SVG Agent Icon */}
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        className="w-4 h-4 relative z-10 text-white"
+      >
+        {/* The Outer Frame (Terminal-like) */}
+        <path
+          d="M4 6C4 4.89543 4.89543 4 6 4H18C19.1046 4 20 4.89543 20 6V18C20 19.1046 19.1046 20 18 20H6C4.89543 20 4 19.1046 4 18V6Z"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className="opacity-40"
+        />
+        {/* The Prompt Symbol */}
+        <path
+          d="M8 9L10 11L8 13"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {/* The Pulsing Core (The "Eye" of the Agent) */}
+        <circle
+          cx="15"
+          cy="12"
+          r="2.5"
+          fill="currentColor"
+          className="animate-pulse"
+        />
+        {/* Orbital dots */}
+        <circle cx="15" cy="7" r="1" fill="currentColor" className="opacity-60" />
+        <circle cx="19" cy="12" r="1" fill="currentColor" className="opacity-60" />
+        <circle cx="15" cy="17" r="1" fill="currentColor" className="opacity-60" />
+      </svg>
+      
+      {/* Extra light effect */}
+      <div className="absolute inset-0 rounded-lg bg-white/10 group-hover:bg-white/20 transition-colors" />
+    </div>
+  );
+}
+
 /* ─── page ─────────────────────────────────────────────── */
 
 export default function DashboardPage() {
@@ -395,10 +445,8 @@ export default function DashboardPage() {
         <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between gap-4">
 
           {/* Logo */}
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="w-7 h-7 rounded-lg bg-linear-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-              <Database className="w-3.5 h-3.5 text-white" />
-            </div>
+          <div className="flex items-center gap-2 shrink-0 group">
+            <AgentLogo />
             <span className="font-semibold text-[15px] text-foreground">Token Dashboard</span>
           </div>
 
