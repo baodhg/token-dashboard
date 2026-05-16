@@ -108,7 +108,7 @@ export default function ModelChart({ data }: Props) {
           <div className="flex items-center justify-between border-b border-border/50 pb-2">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded-lg bg-muted flex items-center justify-center overflow-hidden">
-                <Image src={group.icon} alt={group.label} width={16} height={16} style={{ width: 16, height: 16, objectFit: "contain" }} />
+                <Image src={group.icon} alt={group.label} width={16} height={16} style={{ width: 16, height: 16, objectFit: "contain", transform: group.id === "codex" ? "scale(1.35)" : undefined }} />
               </div>
               <span className="text-[13px] font-bold text-foreground">{group.label}</span>
             </div>
@@ -121,7 +121,7 @@ export default function ModelChart({ data }: Props) {
 
           {/* Recharts Horizontal Bar Chart for this group */}
           <div style={{ height: group.models.length * 32 + 20 }}>
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height={group.models.length * 32 + 20}>
               <BarChart
                 data={group.models}
                 layout="vertical"

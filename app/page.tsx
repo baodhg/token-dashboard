@@ -151,7 +151,7 @@ function SourceBadge({ source }: { source: string }) {
       style={{ background: `${color}10`, color, borderColor: `${color}30` }}
     >
       {iconSrc ? (
-        <Image src={iconSrc} alt={label} width={12} height={12} className="opacity-90" style={{ width: 12, height: 12, objectFit: "contain" }} />
+        <Image src={iconSrc} alt={label} width={12} height={12} className="opacity-90" style={{ width: 12, height: 12, objectFit: "contain", transform: source === "codex" ? "scale(1.35)" : undefined }} />
       ) : (
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
       )}
