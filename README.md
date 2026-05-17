@@ -162,10 +162,15 @@ npm start
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get started.
 
 Areas where help is appreciated:
-- Screenshots / demo GIF for this README
 - Additional source integrations (Windsurf, Aider, Continue, etc.)
 - Docker Compose setup
 - Tests
+
+---
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=baodhg/token-dashboard&type=Date)](https://star-history.com/#baodhg/token-dashboard&Date)
 
 ---
 
