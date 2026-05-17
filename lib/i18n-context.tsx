@@ -23,8 +23,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>("vi");
 
   useEffect(() => {
-    const saved = localStorage.getItem("locale") as Locale;
+    const saved = localStorage.getItem("locale") as Locale | null;
     if (saved && (saved === "vi" || saved === "en")) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocaleState(saved);
     }
   }, []);
@@ -36,10 +37,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   const t = (key: string): string => {
     const keys = key.split(".");
-    let value: any = messages[locale];
+    let value: unknown = messages[locale];
     for (const k of keys) {
-      if (value && typeof value === "object" && k in value) {
-        value = value[k];
+      if (value && typeof value === "object" && k in (value as Record<string, unknown>)) {
+        value = (value as Record<string, unknown>)[k];
       } else {
         return key;
       }

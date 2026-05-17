@@ -41,10 +41,9 @@ function CustomTooltip({ active, payload, label }: any) {
 const X_INTERVAL: Record<Exclude<Period, "custom">, number> = {
   "1d": 3,
   "3d": 2,
-  "5d": 0,
   "1w": 0,
   "1m": 4,
-  "1y": 0,
+  "all": 3,
 };
 
 function getInterval(p: Period, len: number) {
@@ -54,14 +53,14 @@ function getInterval(p: Period, len: number) {
 
 export default function CacheChart({ data, period }: Props) {
   const { t } = useI18n();
-  const needsAngle = period === "1m" || period === "1d" || (period === "custom" && data.length > 7);
+  const needsAngle = period === "1m" || period === "1d" || period === "all" || (period === "custom" && data.length > 7);
 
   return (
     <ResponsiveContainer width="100%" height={256}>
       <BarChart
         data={data}
-        margin={{ top: 4, right: 8, left: 4, bottom: needsAngle ? 16 : 0 }}
-        barSize={period === "1d" ? 16 : period === "1m" ? 12 : 28}
+        margin={{ top: 20, right: 8, left: 4, bottom: needsAngle ? 16 : 0 }}
+        barSize={period === "1d" ? 16 : (period === "1m" || period === "all") ? 12 : 28}
       >
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
         <XAxis
@@ -79,6 +78,7 @@ export default function CacheChart({ data, period }: Props) {
         />
         <YAxis
           tickFormatter={formatK}
+          domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.15)]}
           tick={{ fontSize: 11, fill: "var(--chart-tick)", fontFamily: "inherit" }}
           axisLine={false}
           tickLine={false}

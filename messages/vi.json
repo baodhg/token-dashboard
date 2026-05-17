@@ -6,6 +6,7 @@
     "estimated_cost": "Chi phí ước tính",
     "reference_price": "Giá tham khảo",
     "total": "tổng",
+    "cached": "đã cache",
     "calls": "lượt gọi",
     "syncing": "Đang sync...",
     "sync": "Sync",
@@ -29,7 +30,9 @@
     "projects": "dự án",
     "platform": "Platform",
     "input": "Input",
-    "output": "Output"
+    "output": "Output",
+    "github_copilot": "GitHub Copilot",
+    "cursor": "Cursor"
   },
   "periods": {
     "1d": "Hôm nay",
@@ -38,6 +41,7 @@
     "1w": "Tuần",
     "1m": "Tháng",
     "1y": "Năm",
+    "all": "Tất cả",
     "custom": "Tuỳ chỉnh"
   }
 }

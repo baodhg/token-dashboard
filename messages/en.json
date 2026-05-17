@@ -6,6 +6,7 @@
     "estimated_cost": "Estimated Cost",
     "reference_price": "Reference Price",
     "total": "total",
+    "cached": "cached",
     "calls": "calls",
     "syncing": "Syncing...",
     "sync": "Sync",
@@ -29,7 +30,9 @@
     "projects": "projects",
     "platform": "Platform",
     "input": "Input",
-    "output": "Output"
+    "output": "Output",
+    "github_copilot": "GitHub Copilot",
+    "cursor": "Cursor"
   },
   "periods": {
     "1d": "Today",
@@ -38,6 +41,7 @@
     "1w": "Week",
     "1m": "Month",
     "1y": "Year",
+    "all": "All time",
     "custom": "Custom"
   }
 }

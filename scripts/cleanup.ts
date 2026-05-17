@@ -31,10 +31,11 @@ async function main() {
           data: { lastSize: BigInt(0) },
         });
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Bỏ qua các file không tồn tại (đã bị xoá từ trước)
-      if (e.code !== "ENOENT") {
-        console.error(`Lỗi khi xử lý ${state.filePath}:`, e.message);
+      const err = e as { code?: string; message?: string };
+      if (err.code !== "ENOENT") {
+        console.error(`Lỗi khi xử lý ${state.filePath}:`, err.message || String(e));
       }
     }
   }

@@ -1,4 +1,4 @@
-export type Period = "1d" | "3d" | "5d" | "1w" | "1m" | "1y" | "custom";
+export type Period = "1d" | "3d" | "1w" | "1m" | "all" | "custom";
 
 export interface DataPoint {
   label: string;
@@ -20,10 +20,9 @@ export interface RecentCall {
 export const PERIODS: { key: Period; label: string }[] = [
   { key: "1d", label: "Hôm nay" },
   { key: "3d", label: "3 ngày" },
-  { key: "5d", label: "5 ngày" },
   { key: "1w", label: "Tuần" },
   { key: "1m", label: "Tháng" },
-  { key: "1y", label: "Năm" },
+  { key: "all", label: "Tất cả" },
   { key: "custom", label: "Tuỳ chỉnh" },
 ];
 

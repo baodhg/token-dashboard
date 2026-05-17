@@ -34,6 +34,8 @@ const PLATFORMS = [
   { id: "cline",       label: "Cline",       icon: "/cline.png",  color: "90, 99, 112" },   // Dark slate
   { id: "codex",       label: "Codex",       icon: "/codex.png",  color: "123, 108, 246" },  // Purple-blue
   { id: "gemini",      label: "Gemini CLI",  icon: "/geminicli.png", color: "66, 133, 244" }, // Blue
+  { id: "github_copilot", label: "GitHub Copilot", icon: "/github.png", color: "36, 41, 46" }, // Dark gray/black
+  { id: "cursor",         label: "Cursor",         icon: "/cursor.png",         color: "95, 201, 248" }, // Light blue
 ];
 
 function calculateBarColor(rgb: string, pct: number, isMax: boolean) {
@@ -108,7 +110,7 @@ export default function ModelChart({ data }: Props) {
           <div className="flex items-center justify-between border-b border-border/50 pb-2">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded-lg bg-muted flex items-center justify-center overflow-hidden">
-                <Image src={group.icon} alt={group.label} width={16} height={16} style={{ width: 16, height: 16, objectFit: "contain", transform: group.id === "codex" ? "scale(1.35)" : undefined }} />
+                <Image src={group.icon} alt={group.label} width={16} height={16} style={{ width: 16, height: 16, objectFit: "contain", transform: (group.id === "codex" || group.id === "github_copilot") ? "scale(1.35)" : undefined }} />
               </div>
               <span className="text-[13px] font-bold text-foreground">{group.label}</span>
             </div>

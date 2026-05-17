@@ -52,12 +52,11 @@ function CustomLegend({ payload }: any) {
 }
 
 const X_INTERVAL: Record<Exclude<Period, "custom">, number> = {
-  "1d": 3,   // every 4 hours → 6 labels
-  "3d": 2,   // every 3rd point → 4 labels
-  "5d": 0,
+  "1d": 3,   // every 4 hours â†’ 6 labels
+  "3d": 2,   // every 3rd point â†’ 4 labels
   "1w": 0,
-  "1m": 4,   // every 5 days → 6 labels
-  "1y": 0,
+  "1m": 4,   // every 5 days â†’ 6 labels
+  "all": 3,  // every 4 months â†’ 6 labels
 };
 
 function getInterval(p: Period, len: number) {
@@ -70,11 +69,11 @@ export default function TokenChart({ data, period }: Props) {
   const maxVal = Math.max(...data.map(d => d.input + d.output), 1);
   const ticks = Array.from({ length: 5 }, (_, i) => Math.round((maxVal / 4) * i));
 
-  const needsAngle = period === "1m" || period === "1d" || (period === "custom" && data.length > 7);
+  const needsAngle = period === "1m" || period === "1d" || period === "all" || (period === "custom" && data.length > 7);
 
   return (
     <ResponsiveContainer width="100%" height={280}>
-      <LineChart data={data} margin={{ top: 4, right: 8, left: 4, bottom: needsAngle ? 16 : 0 }}>
+      <LineChart data={data} margin={{ top: 20, right: 8, left: 4, bottom: needsAngle ? 16 : 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
         <XAxis
           dataKey="label"
@@ -92,6 +91,7 @@ export default function TokenChart({ data, period }: Props) {
         <YAxis
           ticks={ticks}
           tickFormatter={formatK}
+          domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.15)]}
           tick={{ fontSize: 11, fill: "var(--chart-tick)", fontFamily: "inherit" }}
           axisLine={false}
           tickLine={false}

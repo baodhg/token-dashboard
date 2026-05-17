@@ -1,7 +1,8 @@
-import { readdir, readFile, stat } from "fs/promises";
+import { readdir, readFile, stat, copyFile, unlink } from "fs/promises";
 import { join } from "path";
-import { homedir } from "os";
+import { homedir, tmpdir } from "os";
 import { prisma } from "@/lib/db";
+import Database from "better-sqlite3";
 
 /* ─── Claude Code cost table ──────────────────────────── */
 
@@ -29,6 +30,7 @@ interface JournalEntry {
       input_tokens?: number;
       output_tokens?: number;
       cache_read_input_tokens?: number;
+      cache_creation_input_tokens?: number;
     };
   };
   requestId?: string;
@@ -70,9 +72,16 @@ async function syncClaudeFile(filePath: string, projectName: string) {
 
     const u = entry.message.usage;
     const model = entry.message.model ?? "unknown";
-    const input  = u.input_tokens ?? 0;
-    const output = u.output_tokens ?? 0;
-    const cache  = u.cache_read_input_tokens ?? 0;
+    const cacheRead  = u.cache_read_input_tokens ?? 0;
+    const cacheWrite = u.cache_creation_input_tokens ?? 0;
+    const input      = (u.input_tokens ?? 0) + cacheRead + cacheWrite;
+    const output     = u.output_tokens ?? 0;
+
+    // Cost calculation: Input tokens are charged, cache reads are cheaper, cache creation is charged as input
+    const r = MODEL_COST[model] ?? { input: 3, output: 15 };
+    const cost = ((u.input_tokens ?? 0) + cacheWrite) / 1_000_000 * r.input + 
+                 (output / 1_000_000) * r.output + 
+                 (cacheRead / 1_000_000) * (r.input * 0.1); // Cache read is typically 10% of input cost
 
     toUpsert.push({
       where:  { id: entry.requestId },
@@ -82,8 +91,8 @@ async function syncClaudeFile(filePath: string, projectName: string) {
         model,
         inputTokens:  input,
         outputTokens: output,
-        cacheTokens:  cache,
-        cost:         calcCost(model, input, output),
+        cacheTokens:  cacheRead,
+        cost:         cost,
         timestamp:    new Date(entry.timestamp),
         sessionId:    entry.sessionId ?? null,
         project:      projectName,
@@ -198,9 +207,9 @@ async function syncClineTasks(): Promise<number> {
 
       const id = `cline_${taskId}_${msg.ts}`;
       const model = resolveModelAtTs(modelUsage, msg.ts);
-      const input  = parsed.tokensIn    ?? 0;
-      const output = parsed.tokensOut   ?? 0;
       const cache  = parsed.cacheReads  ?? 0;
+      const input  = (parsed.tokensIn   ?? 0) + cache; // Normalize to total input
+      const output = parsed.tokensOut   ?? 0;
 
       toUpsert.push({
         where:  { id },
@@ -523,6 +532,290 @@ async function syncGeminiFile(filePath: string, projectName: string): Promise<nu
   return toCreate.length;
 }
 
+/* ─── GitHub Copilot format ───────────────────────────── */
+
+interface CopilotUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+}
+
+interface CopilotEntry {
+  type?: string;
+  timestamp?: string;
+  model?: string;
+  usage?: CopilotUsage;
+  requestId?: string;
+}
+
+async function syncCopilotSessions(): Promise<number> {
+  const roam = join(homedir(), "AppData", "Roaming");
+  const paths = [
+    join(roam, "Code", "User", "workspaceStorage"),
+    join(roam, "Antigravity", "User", "workspaceStorage"),
+    join(roam, "Cursor", "User", "workspaceStorage"),
+  ];
+
+  let totalNew = 0;
+
+  for (const wsRoot of paths) {
+    let wsDirs: string[] = [];
+    try {
+      wsDirs = await readdir(wsRoot);
+    } catch { continue; }
+
+    for (const ws of wsDirs) {
+      const chatDir = join(wsRoot, ws, "chatSessions");
+      let s: Awaited<ReturnType<typeof stat>>;
+      try { s = await stat(chatDir); } catch { continue; }
+      if (!s.isDirectory()) continue;
+
+      let files: string[];
+      try {
+        files = (await readdir(chatDir)).filter(f => f.endsWith(".jsonl"));
+      } catch { continue; }
+
+      for (const file of files) {
+        try {
+          totalNew += await syncCopilotChatFile(join(chatDir, file), ws);
+        } catch { /* skip */ }
+      }
+    }
+  }
+
+  return totalNew;
+}
+
+async function syncCopilotChatFile(filePath: string, wsId: string): Promise<number> {
+  const fileStat = await stat(filePath);
+  const currentSize = BigInt(fileStat.size);
+
+  const syncKey = `copilot_chat:${filePath}`;
+  const state = await prisma.syncState.findUnique({ where: { filePath: syncKey } });
+  const lastSize = state?.lastSize ?? BigInt(0);
+
+  if (currentSize <= lastSize) return 0;
+
+  const content = await readFile(filePath, "utf-8");
+  const lines = content.split("\n");
+  
+  const toCreate: { id: string; model: string; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number; timestamp: Date; sessionId: string; project: string | null; source: string }[] = [];
+  
+  // Track requests both by ID and by index (for patches)
+  const requestsById = new Map<string, { modelId?: string; timestamp?: Date; promptTokens?: number; completionTokens?: number }>();
+  const requestsByIndex: (string | null)[] = [];
+  let fileSessionId = wsId;
+
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let entry: any;
+    try { entry = JSON.parse(line); } catch { continue; }
+
+    // kind 0: Session Start
+    if (entry.kind === 0 && entry.v && entry.v.sessionId) {
+      fileSessionId = entry.v.sessionId;
+    }
+
+    // kind 2: Request Start/Meta (adds to index)
+    if (entry.kind === 2 && entry.v && Array.isArray(entry.v)) {
+      for (const req of entry.v) {
+        if (!req.requestId) {
+          requestsByIndex.push(null);
+          continue;
+        }
+        const existing = requestsById.get(req.requestId) || {};
+        requestsById.set(req.requestId, {
+          ...existing,
+          modelId: req.modelId || existing.modelId,
+          timestamp: req.timestamp ? new Date(req.timestamp) : existing.timestamp,
+          promptTokens: req.promptTokens || existing.promptTokens,
+          completionTokens: req.completionTokens || existing.completionTokens,
+        });
+        requestsByIndex.push(req.requestId);
+      }
+    }
+
+    // kind 1: Patch/Update by index
+    // Example: {"kind":1,"k":["requests",1,"completionTokens"],"v":177}
+    if (entry.kind === 1 && Array.isArray(entry.k) && entry.k[0] === "requests") {
+      const idx = entry.k[1];
+      const field = entry.k[2];
+      const reqId = requestsByIndex[idx];
+      
+      if (reqId) {
+        const existing = requestsById.get(reqId) || {};
+        if (field === "promptTokens") {
+          requestsById.set(reqId, { ...existing, promptTokens: entry.v });
+        } else if (field === "completionTokens") {
+          requestsById.set(reqId, { ...existing, completionTokens: entry.v });
+        }
+      }
+    }
+  }
+
+  // Final pass: convert collected requests to DB records
+  for (const [reqId, data] of requestsById.entries()) {
+    const input = data.promptTokens || 0;
+    const output = data.completionTokens || 0;
+    if (input === 0 && output === 0) continue;
+
+    toCreate.push({
+      id:           `copilot_${reqId}`,
+      model:        data.modelId || "copilot",
+      inputTokens:  input,
+      outputTokens: output,
+      cacheTokens:  0,
+      cost:         0,
+      timestamp:    data.timestamp || fileStat.mtime,
+      sessionId:    `copilot_${fileSessionId}`,
+      project:      null,
+      source:       "github_copilot",
+    });
+  }
+
+  if (toCreate.length > 0) {
+    await prisma.call.createMany({ data: toCreate, skipDuplicates: true });
+  }
+
+  await prisma.syncState.upsert({
+    where: { filePath: syncKey },
+    update: { lastSize: currentSize },
+    create: { filePath: syncKey, lastSize: currentSize },
+  });
+
+  return toCreate.length;
+}
+
+/* ─── Cursor format ───────────────────────────────────── */
+
+async function syncCursorSessions(): Promise<number> {
+  const roam = join(homedir(), "AppData", "Roaming");
+  // Try both Antigravity (older/internal) and Cursor (standard)
+  const paths = [
+    join(roam, "Antigravity", "User"),
+    join(roam, "Cursor", "User"),
+  ];
+
+  let totalNew = 0;
+
+  for (const userPath of paths) {
+    // 1. Global Storage
+    const globalDb = join(userPath, "globalStorage", "state.vscdb");
+    try {
+      totalNew += await syncCursorDb(globalDb, "global");
+    } catch { /* skip */ }
+
+    // 2. Workspace Storage
+    const wsRoot = join(userPath, "workspaceStorage");
+    let wsDirs: string[] = [];
+    try {
+      wsDirs = await readdir(wsRoot);
+    } catch { continue; }
+
+    for (const ws of wsDirs) {
+      const wsDb = join(wsRoot, ws, "state.vscdb");
+      try {
+        totalNew += await syncCursorDb(wsDb, ws);
+      } catch { /* skip */ }
+    }
+  }
+
+  return totalNew;
+}
+
+async function syncCursorDb(dbPath: string, wsId: string): Promise<number> {
+  let s: Awaited<ReturnType<typeof stat>>;
+  try { s = await stat(dbPath); } catch { return 0; }
+
+  const syncKey = `cursor:${dbPath}`;
+  const state = await prisma.syncState.findUnique({ where: { filePath: syncKey } });
+  const lastSyncedAt = state?.lastSyncedAt ?? new Date(0);
+
+  // If DB hasn't changed since last sync, skip
+  if (s.mtime <= lastSyncedAt) return 0;
+
+  // Copy to temp to avoid lock
+  const tmpDb = join(tmpdir(), `cursor_sync_${Math.random().toString(36).slice(2)}.db`);
+  await copyFile(dbPath, tmpDb);
+
+  const toCreate: { id: string; model: string; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number; timestamp: Date; sessionId: string; project: string | null; source: string }[] = [];
+
+  try {
+    const db = new Database(tmpDb, { readonly: true });
+    
+    // Cursor often uses 'cursorDiskKV' table in newer versions or 'ItemTable' in older ones
+    let table = "ItemTable";
+    try {
+      const check = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='cursorDiskKV'").get();
+      if (check) table = "cursorDiskKV";
+    } catch { /* ItemTable it is */ }
+
+    // Look for bubble usage, composer data or chat data
+    const rows = db.prepare(`SELECT key, value FROM ${table} WHERE key LIKE 'bubbleId:%' OR key LIKE 'composer.composerData%' OR key LIKE '%aichat.chatdata%' OR key LIKE '%composerData%'`).all() as { key: string; value: string }[];
+
+    for (const row of rows) {
+      let data: any;
+      try { data = JSON.parse(row.value); } catch { continue; }
+
+      // 1. Direct bubble/composer format
+      if (row.key.startsWith('bubbleId:') || row.key.startsWith('composer.composerData')) {
+        const usage = data.usage || data.modelMetrics || {};
+        const input  = usage.input_tokens || usage.promptTokens || 0;
+        const output = usage.output_tokens || usage.completionTokens || 0;
+
+        if (input === 0 && output === 0) continue;
+
+        const timestamp = data.timestamp ? new Date(data.timestamp) : s.mtime;
+        toCreate.push({
+          id: `cursor_${wsId}_${row.key}_${timestamp.getTime()}`,
+          model: data.model || "cursor",
+          inputTokens: input, outputTokens: output, cacheTokens: 0, cost: 0,
+          timestamp, sessionId: `cursor_${wsId}`, project: null, source: "cursor",
+        });
+      }
+      // 2. Legacy / Antigravity aichat.chatdata format (nested)
+      else if (row.key.includes('aichat.chatdata')) {
+        const tabs = data.tabs || [];
+        for (const tab of tabs) {
+          const bubbles = tab.bubbles || [];
+          for (const bubble of bubbles) {
+            const usage = bubble.modelUsage || {};
+            const input = usage.input_tokens || 0;
+            const output = usage.output_tokens || 0;
+            if (input === 0 && output === 0) continue;
+
+            const ts = bubble.timestamp ? new Date(bubble.timestamp) : s.mtime;
+            toCreate.push({
+              id: `cursor_${wsId}_chat_${bubble.id || Math.random()}`,
+              model: bubble.model || "cursor",
+              inputTokens: input, outputTokens: output, cacheTokens: 0, cost: 0,
+              timestamp: ts, sessionId: `cursor_${wsId}`, project: null, source: "cursor",
+            });
+          }
+        }
+      }
+    }
+
+    db.close();
+  } catch {
+    // console.error("Cursor Sync Error:", e);
+  } finally {
+    try { await unlink(tmpDb); } catch {}
+  }
+
+  if (toCreate.length > 0) {
+    await prisma.call.createMany({ data: toCreate, skipDuplicates: true });
+  }
+
+  await prisma.syncState.upsert({
+    where:  { filePath: syncKey },
+    update: { lastSyncedAt: s.mtime },
+    create: { filePath: syncKey, lastSyncedAt: s.mtime, lastSize: BigInt(s.size) },
+  });
+
+  return toCreate.length;
+}
+
 /* ─── POST handler ────────────────────────────────────── */
 
 export async function POST() {
@@ -555,16 +848,20 @@ export async function POST() {
     }
   }
 
-  const clineNew  = await syncClineTasks();
-  const codexNew  = await syncCodexSessions();
-  const geminiNew = await syncGeminiSessions();
+  const clineNew   = await syncClineTasks();
+  const codexNew   = await syncCodexSessions();
+  const geminiNew  = await syncGeminiSessions();
+  const copilotNew = await syncCopilotSessions();
+  const cursorNew  = await syncCursorSessions();
 
   return Response.json({
-    synced: claudeNew + clineNew + codexNew + geminiNew,
+    synced: claudeNew + clineNew + codexNew + geminiNew + copilotNew + cursorNew,
     claude: claudeNew,
     cline:  clineNew,
     codex:  codexNew,
     gemini: geminiNew,
+    copilot: copilotNew,
+    cursor: cursorNew,
   });
 }
 

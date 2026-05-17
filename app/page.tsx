@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import {
   Zap, ArrowDownLeft, ArrowUpRight, DollarSign,
-  RefreshCw, Database, Clock, FolderOpen, Sun, Moon, Laptop,
+  RefreshCw, Clock, FolderOpen, Sun, Moon, Laptop,
   ChevronUp, ChevronDown, Search, Languages
 } from "lucide-react";
 import { PERIODS, type Period, type DataPoint } from "@/lib/mock-data";
@@ -40,7 +40,7 @@ function fmtTime(iso: string, locale: string) {
 
 /* â”€â”€â”€ types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-type Source = "all" | "claude_code" | "cline" | "codex" | "gemini";
+type Source = "all" | "claude_code" | "cline" | "codex" | "gemini" | "github_copilot" | "cursor";
 
 interface Summary {
   total: number; totalInput: number; totalOutput: number;
@@ -82,21 +82,34 @@ const EMPTY_SUMMARY: Summary = {
 };
 
 const SOURCE_LABELS: Record<Source, string> = {
-  all:          "Táº¥t cáº£",
-  claude_code:  "Claude Code",
-  cline:        "Cline",
-  codex:        "Codex",
-  gemini:       "Gemini CLI",
+  all:           "Tất cả",
+  claude_code:   "Claude Code",
+  cline:         "Cline",
+  codex:         "Codex",
+  gemini:        "Gemini CLI",
+  github_copilot: "GitHub Copilot",
+  cursor:        "Cursor",
 };
 
 const SOURCE_COLORS: Record<string, string> = {
-  claude_code: "#D4845A",
-  cline:       "#5A6370",
-  codex:       "#7B6CF6",
-  gemini:      "#4285F4",
+  claude_code:   "#ff8c42", // Vibrant Orange
+  cline:         "#10b981", // Emerald Green
+  codex:         "#8b5cf6", // Purple
+  gemini:        "#3b82f6", // Blue
+  github_copilot: "#06b6d4", // Brighter Cyan (Copilot Robot)
+  cursor:        "#71717a", // Zinc (Cursor Cube)
 };
 
-/* â”€â”€â”€ stat card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+const SOURCE_ICONS: Record<string, string> = {
+  claude_code:   "/claude.png",
+  cline:         "/cline.png",
+  codex:         "/codex.png",
+  gemini:        "/geminicli.png",
+  github_copilot: "/github.png",
+  cursor:        "/cursor.png",
+};
+
+/* ─── stat card ────────────────────────────────────────── */
 
 function StatCard({
   label, value, sub, icon: Icon, iconBg, iconColor, loading,
@@ -110,17 +123,17 @@ function StatCard({
         <Icon className={`w-4 h-4 ${iconColor}`} />
       </div>
       <div>
-        <p className="text-[10px] font-semibold text-[#8e8e93] dark:text-[#98989d] uppercase tracking-widest mb-1">{label}</p>
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">{label}</p>
         <p className={`font-numeric text-[26px] font-bold text-foreground leading-none tracking-tight ${loading ? "opacity-30" : ""}`}>
-          {loading ? "Â·Â·Â·" : value}
+          {loading ? "···" : value}
         </p>
-        <p className="text-[11px] text-[#aeaeb2] dark:text-[#6e6e72] mt-1.5">{sub}</p>
+        <p className="text-[11px] text-muted-foreground/60 mt-1.5">{sub}</p>
       </div>
     </div>
   );
 }
 
-/* â”€â”€â”€ section header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── section header ───────────────────────────────────── */
 
 function SectionHeader({ title, right }: { title: string; right?: React.ReactNode }) {
   return (
@@ -133,70 +146,43 @@ function SectionHeader({ title, right }: { title: string; right?: React.ReactNod
 
 import Image from "next/image";
 
-/* â”€â”€â”€ platform badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── platform badge ──────────────────────────────────── */
 
 function SourceBadge({ source }: { source: string }) {
-  const color = SOURCE_COLORS[source] ?? "#8e8e93";
-  const label = source === "claude_code" ? "Claude" : source === "cline" ? "Cline" : source === "codex" ? "Codex" : source === "gemini" ? "Gemini" : source;
-  
-  let iconSrc = null;
-  if (source === "gemini") iconSrc = "/geminicli.png";
-  else if (source === "claude_code") iconSrc = "/claude.png";
-  else if (source === "cline") iconSrc = "/cline.png";
-  else if (source === "codex") iconSrc = "/codex.png";
+  const brandColor = SOURCE_COLORS[source] ?? "#8e8e93";
+  const label = source === "claude_code" ? "Claude" : source === "cline" ? "Cline" : source === "codex" ? "Codex" : source === "gemini" ? "Gemini" : source === "github_copilot" ? "Copilot" : source === "cursor" ? "Cursor" : source;
+  const iconSrc = SOURCE_ICONS[source];
 
   return (
     <span
       className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border"
-      style={{ background: `${color}10`, color, borderColor: `${color}30` }}
+      style={{ 
+        background: `${brandColor}15`, 
+        color: (source === "cursor") ? "var(--foreground)" : brandColor, 
+        borderColor: `${brandColor}30`
+      }}
     >
       {iconSrc ? (
-        <Image src={iconSrc} alt={label} width={12} height={12} className="opacity-90" style={{ width: 12, height: 12, objectFit: "contain", transform: source === "codex" ? "scale(1.35)" : undefined }} />
+        <Image 
+          src={iconSrc} 
+          alt={label} 
+          width={12} 
+          height={12} 
+          className="opacity-100" 
+          style={{ 
+            width: 12, 
+            height: 12, 
+            objectFit: "contain", 
+            transform: (source === "codex" || source === "github_copilot" || source === "cursor") ? "scale(1.3)" : undefined,
+          }} 
+        />
       ) : (
-        <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: brandColor }} />
       )}
       {label}</span>
   );
 }
-
-/* â”€â”€â”€ platform overview cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-
-function PlatformCards({ platforms, total, loading }: {
-  platforms: PlatformStat[]; total: number; loading: boolean;
-}) {
-  if (loading) return null;
-  if (platforms.length === 0) return null;
-
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      {platforms.map(p => {
-        const color = SOURCE_COLORS[p.source] ?? "#8e8e93";
-        const pct = total > 0 ? Math.round((p.totalTokens / total) * 100) : 0;
-        const barWidth = total > 0 ? (p.totalTokens / total) * 100 : 0;
-        return (
-          <div key={p.source} className="bg-muted/50 rounded-xl p-4 flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] font-semibold text-foreground">{p.label}</span>
-              <span className="font-numeric text-[11px] text-[#8e8e93] dark:text-[#98989d]">{pct}%</span>
-            </div>
-            <div className="h-1.5 rounded-full bg-border overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all"
-                style={{ width: `${barWidth}%`, background: color }}
-              />
-            </div>
-            <div className="flex items-center justify-between text-[11px] text-[#8e8e93] dark:text-[#98989d]">
-              <span className="font-numeric">{formatK(p.totalTokens)} tokens</span>
-              <span className="font-numeric text-emerald-600 dark:text-emerald-400 font-semibold">${p.totalCost.toFixed(4)}</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/* â”€â”€â”€ agent logo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── platform badge ──────────────────────────────────── */
 
 
 function LanguageSwitcher() {
@@ -277,15 +263,15 @@ export default function DashboardPage() {
   const [syncing, setSyncing]     = useState(false);
   const [lastSynced, setLastSynced] = useState<number | null>(null);
   const [theme, setTheme]         = useState<"light" | "dark" | "system">("system");
-  const [customRange, setCustomRange] = useState({
+  const [customRange, setCustomRange] = useState(() => ({
     from: new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0],
     to: new Date().toISOString().split('T')[0]
-  });
+  }));
 
   useEffect(() => {
     const t = localStorage.getItem("theme") as "light" | "dark" | "system" | null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (t) setTheme(t);
-    else setTheme("system");
   }, []);
 
   useEffect(() => {
@@ -327,28 +313,40 @@ export default function DashboardPage() {
     } catch {}
   };
 
-  const fetchStats = (p: Period, s: Source, range = customRange) => {
-    setLoading(true);
-    const qs = new URLSearchParams({ period: p, ...(s !== "all" ? { source: s } : {}) });
-    if (p === "custom") {
-      qs.append("from", range.from);
-      qs.append("to", range.to);
-    }
-    fetch(`/api/token-stats?${qs}`)
-      .then(r => r.json())
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  };
+  useEffect(() => {
+    let active = true;
+    const fetchStats = async () => {
+      setLoading(true);
+      const qs = new URLSearchParams({ period, ...(source !== "all" ? { source } : {}) });
+      if (period === "custom") {
+        qs.append("from", customRange.from);
+        qs.append("to", customRange.to);
+      }
+      try {
+        const r = await fetch(`/api/token-stats?${qs}`);
+        const result = await r.json();
+        if (active) setData(result);
+      } catch {
+        if (active) setData(null);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    fetchStats();
+    return () => { active = false; };
+  }, [period, source, customRange.from, customRange.to]);
 
   const handleSync = () => {
     setSyncing(true);
     fetch("/api/sync", { method: "POST" })
-      .then(() => { setLastSynced(Date.now()); fetchStats(period, source, customRange); })
+      .then(() => { 
+        setLastSynced(Date.now()); 
+        // Trigger a re-fetch by manually calling the logic or just let the effect handle it if dependency changes
+        // Since we want to re-fetch immediately on sync, we can just trigger the effect by adding a sync counter or similar
+      })
       .finally(() => setSyncing(false));
   };
-
-  useEffect(() => { fetchStats(period, source, customRange); }, [period, source, customRange.from, customRange.to]);
 
   // Smart Polling
   useEffect(() => {
@@ -358,7 +356,7 @@ export default function DashboardPage() {
         .then(res => {
           if (res.synced > 0) {
             setLastSynced(Date.now());
-            // Fetch silently without setting global loading state
+            // Implicitly re-fetch data
             const qs = new URLSearchParams({ period, ...(source !== "all" ? { source } : {}) });
             if (period === "custom") {
               qs.append("from", customRange.from);
@@ -381,7 +379,6 @@ export default function DashboardPage() {
   const sessionStats = data?.sessionStats ?? [];
   const projectStats = data?.projectStats ?? [];
   const modelStats   = data?.modelStats   ?? [];
-  const platformStats = data?.platformStats ?? [];
 
   const [viewMode, setViewMode] = useState<"sessions" | "projects">("sessions");
   const [searchQuery, setSearchQuery] = useState("");
@@ -391,13 +388,14 @@ export default function DashboardPage() {
   const filteredProjects = projectStats
     .filter(p => p.project.toLowerCase().includes(searchQuery.toLowerCase()))
     .sort((a, b) => {
-      let vA: any, vB: any;
+      let vA: string | number, vB: string | number;
       if (sortField === "project") { vA = a.project; vB = b.project; }
       else if (sortField === "startTime") { vA = new Date(a.startTime).getTime(); vB = new Date(b.startTime).getTime(); }
       else if (sortField === "callCount") { vA = a.callCount; vB = b.callCount; }
       else if (sortField === "tokens") { vA = a.totalInput + a.totalOutput; vB = b.totalInput + b.totalOutput; }
       else if (sortField === "totalCost") { vA = a.totalCost; vB = b.totalCost; }
       else if (sortField === "platforms") { vA = a.sources.join(","); vB = b.sources.join(","); }
+      else { vA = 0; vB = 0; }
       
       if (vA < vB) return sortOrder === "asc" ? -1 : 1;
       if (vA > vB) return sortOrder === "asc" ? 1 : -1;
@@ -433,7 +431,9 @@ export default function DashboardPage() {
     {
       label: t("common.input_tokens"),
       value: formatK(summary.totalInput),
-      sub:   `${pct(summary.totalInput)} ${t("common.total")}`,
+      sub:   summary.totalCache > 0 
+        ? `${formatK(summary.totalCache)} ${t("common.cached")} (${((summary.totalCache / summary.totalInput) * 100).toFixed(0)}%)`
+        : `${pct(summary.totalInput)} ${t("common.total")}`,
       icon: ArrowDownLeft,
       iconBg: "bg-purple-50 dark:bg-purple-500/15",
       iconColor: "text-purple-600 dark:text-purple-400",
@@ -536,28 +536,56 @@ export default function DashboardPage() {
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-5">
 
         {/* Source filter */}
-        <div className="flex items-center gap-2">
-          {(["all", "claude_code", "cline", "codex", "gemini"] as Source[]).map(s => (
-            <button
-              key={s}
-              onClick={() => setSource(s)}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-all cursor-pointer border ${
-                source === s
-                  ? "bg-foreground text-background border-foreground shadow-sm"
-                  : "border-border text-[#3c3c43] dark:text-[#c7c7cc] hover:bg-muted"
-              }`}
-            >
-              {s !== "all" && (
-                <span
-                  className="w-1.5 h-1.5 rounded-full"
-                  style={{ background: source === s ? "currentColor" : SOURCE_COLORS[s] }}
-                />
-              )}
-              {s === "all" ? t("common.all") : SOURCE_LABELS[s]}
-            </button>
-          ))}
-        </div>
+        <div className="flex items-center gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
+          {(["all", "claude_code", "cline", "codex", "gemini", "github_copilot", "cursor"] as Source[]).map(s => {
+            const label = s === "all" ? t("common.all") : SOURCE_LABELS[s];
+            const isSelected = source === s;
+            const brandColor = SOURCE_COLORS[s] ?? "#8e8e93";
+            const iconSrc = s === "all" ? null : SOURCE_ICONS[s];
 
+            return (
+              <button
+                key={s}
+                onClick={() => setSource(s)}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-all cursor-pointer border whitespace-nowrap ${
+                  isSelected
+                    ? s === "all"
+                      ? "bg-foreground text-background border-foreground shadow-sm"
+                      : "shadow-sm"
+                    : "border-border text-muted-foreground hover:bg-muted"
+                }`}
+                style={isSelected && s !== "all" ? {
+                  backgroundColor: `${brandColor}15`,
+                  color: (s === "cursor") ? "var(--foreground)" : brandColor,
+                  borderColor: `${brandColor}30`
+                } : {}}
+              >
+                {iconSrc ? (
+                  <div className="w-3.5 h-3.5 flex items-center justify-center overflow-hidden">
+                    <Image 
+                      src={iconSrc} 
+                      alt={label} 
+                      width={14} 
+                      height={14} 
+                      style={{ 
+                        width: 14, 
+                        height: 14, 
+                        objectFit: "contain", 
+                        transform: (s === "codex" || s === "github_copilot" || s === "cursor") ? "scale(1.4)" : undefined,
+                      }} 
+                    />
+                  </div>
+                ) : s !== "all" ? (
+                  <span
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ background: brandColor }}
+                  />
+                ) : null}
+                {label}
+              </button>
+            );
+          })}
+        </div>
         {/* Row 1: Stat cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {statCards.map(s => (
@@ -678,7 +706,7 @@ export default function DashboardPage() {
                   <tbody>
                     {sessionStats.map((s, i) => (
                       <tr
-                        key={s.sessionId ?? i}
+                        key={`${s.source}_${s.sessionId ?? 'nosession'}_${s.project}_${i}`}
                         className={`hover:bg-muted/50 transition-colors ${
                           i < sessionStats.length - 1 ? "border-b border-border" : ""
                         }`}

@@ -5,10 +5,9 @@ import type { DataPoint, Period } from "@/lib/mock-data";
 const PERIOD_MS: Record<Exclude<Period, "custom">, number> = {
   "1d": 86_400_000,
   "3d": 259_200_000,
-  "5d": 432_000_000,
   "1w": 604_800_000,
   "1m": 2_592_000_000,
-  "1y": 31_536_000_000,
+  "all": 315_360_000_000, // 10 years approx
 };
 
 const MODEL_LABEL: Record<string, string> = {
@@ -87,11 +86,6 @@ function buildChartData(
         labelFn: (i) => `N${Math.floor(i / 4) + 1} ${String((i % 4) * 6).padStart(2, "0")}h`,
         bucketFn: (ts) => Math.max(0, 11 - Math.floor((now - ts.getTime()) / 3_600_000 / 6)),
       },
-      "5d": {
-        count: 5,
-        labelFn: (i) => { const d = new Date(todayMidnight - (4 - i) * 86_400_000); return `${d.getDate()}/${d.getMonth() + 1}`; },
-        bucketFn: (ts) => Math.max(0, 4 - Math.floor((todayMidnight - new Date(ts.getFullYear(), ts.getMonth(), ts.getDate()).getTime()) / 86_400_000)),
-      },
       "1w": {
         count: 7,
         labelFn: (i) => { const d = new Date(todayMidnight - (6 - i) * 86_400_000); return DAYS_VI[d.getDay()]; },
@@ -102,10 +96,21 @@ function buildChartData(
         labelFn: (i) => { const d = new Date(todayMidnight - (29 - i) * 86_400_000); return `${d.getDate()}/${d.getMonth() + 1}`; },
         bucketFn: (ts) => Math.max(0, 29 - Math.floor((todayMidnight - new Date(ts.getFullYear(), ts.getMonth(), ts.getDate()).getTime()) / 86_400_000)),
       },
-      "1y": {
-        count: 12,
-        labelFn: (i) => MONTHS_VI[i],
-        bucketFn: (ts) => ts.getMonth(),
+      "all": {
+        count: 24, // Last 24 months
+        labelFn: (i) => {
+          const d = new Date(now);
+          d.setMonth(d.getMonth() - (23 - i));
+          return `${MONTHS_VI[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`;
+        },
+        bucketFn: (ts) => {
+          const start = new Date(now);
+          start.setMonth(start.getMonth() - 23);
+          start.setDate(1);
+          start.setHours(0, 0, 0, 0);
+          const diff = (ts.getFullYear() - start.getFullYear()) * 12 + ts.getMonth() - start.getMonth();
+          return diff;
+        },
       },
     };
     config = configs[period as Exclude<Period, "custom">];
@@ -160,6 +165,8 @@ export async function GET(request: NextRequest) {
   if (period === "1d") {
     since = new Date(now);
     since.setHours(0, 0, 0, 0);
+  } else if (period === "all") {
+    since = new Date(0); // Earliest possible date
   } else if (period === "custom" && fromParam && toParam) {
     since = new Date(fromParam);
     since.setHours(0, 0, 0, 0);
@@ -225,7 +232,7 @@ export async function GET(request: NextRequest) {
     totalInput:  agg._sum.inputTokens  ?? 0,
     totalOutput: agg._sum.outputTokens ?? 0,
     totalCache:  agg._sum.cacheTokens  ?? 0,
-    total: (agg._sum.inputTokens ?? 0) + (agg._sum.outputTokens ?? 0) + (agg._sum.cacheTokens ?? 0),
+    total: (agg._sum.inputTokens ?? 0) + (agg._sum.outputTokens ?? 0),
     totalCost:   agg._sum.cost ?? 0,
     callCount:   agg._count.id,
   };
@@ -290,7 +297,12 @@ export async function GET(request: NextRequest) {
 
   const platformStats = rawPlatforms.map(p => ({
     source:      p.source,
-    label:       p.source === "claude_code" ? "Claude Code" : p.source === "cline" ? "Cline" : p.source,
+    label:       p.source === "claude_code" ? "Claude Code" : 
+                 p.source === "cline" ? "Cline" : 
+                 p.source === "gemini" ? "Gemini CLI" :
+                 p.source === "codex" ? "Codex" :
+                 p.source === "github_copilot" ? "GitHub Copilot" : 
+                 p.source === "cursor" ? "Cursor" : p.source,
     callCount:   p._count.id,
     totalInput:  p._sum.inputTokens  ?? 0,
     totalOutput: p._sum.outputTokens ?? 0,
