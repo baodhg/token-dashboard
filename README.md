@@ -56,7 +56,7 @@ Token Dashboard aggregates usage data from multiple AI coding tools into a singl
 
 ## Screenshots
 
-> _Coming soon — contributions welcome!_
+![Token Dashboard](public/demo.png)
 
 ---
 
