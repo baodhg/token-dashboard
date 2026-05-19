@@ -51,37 +51,106 @@ function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   const d: ModelStat = payload[0]?.payload;
   return (
-    <div className="bg-card rounded-xl shadow-lg border border-border px-4 py-3 text-[12px] min-w-40">
+    <div className="bg-card/95 backdrop-blur-sm rounded-xl shadow-xl border border-border px-4 py-3 text-[12px] min-w-44">
       <p className="font-semibold text-foreground mb-2">{label}</p>
-      <div className="space-y-1 text-[#3c3c43] dark:text-[#c7c7cc]">
+      <div className="space-y-1.5 text-muted-foreground">
         <div className="flex justify-between gap-6">
           <span>{t("common.input")}</span>
-          <span className="font-numeric font-semibold">{formatK(d.totalInput)}</span>
+          <span className="font-numeric font-bold text-foreground">{formatK(d.totalInput)}</span>
         </div>
         <div className="flex justify-between gap-6">
           <span>{t("common.output")}</span>
-          <span className="font-numeric font-semibold">{formatK(d.totalOutput)}</span>
+          <span className="font-numeric font-bold text-foreground">{formatK(d.totalOutput)}</span>
         </div>
-        <div className="flex justify-between gap-6 pt-1 border-t border-border text-foreground">
+        <div className="flex justify-between gap-6 pt-1.5 border-t border-border/50 text-foreground/80">
           <span>{t("common.calls")}</span>
-          <span className="font-numeric font-semibold">{d.callCount.toLocaleString()}</span>
+          <span className="font-numeric font-bold">{d.callCount.toLocaleString()}</span>
         </div>
       </div>
     </div>
   );
 }
 
+// Keep track of values across renders and remounts
+const prevValuesMap = new Map<string, number>();
+
+// Custom animated label for the "race" effect
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const AnimatedLabel = (props: any) => {
+  const { x, y, width, height, value, overallTotal, entryKey } = props;
+  
+  // Use the module-level map to get the last known value for this specific model, or 0 if new.
+  const [displayValue, setDisplayValue] = React.useState(() => prevValuesMap.get(entryKey) || 0);
+  const currentDisplayRef = React.useRef(displayValue);
+  
+  React.useEffect(() => {
+    let startTimestamp: number | null = null;
+    const duration = 1200; // Match Bar animation duration
+    const startValue = currentDisplayRef.current;
+    const endValue = value;
+
+    if (startValue === endValue) {
+      setDisplayValue(endValue);
+      return;
+    }
+
+    const step = (timestamp: number) => {
+      if (!startTimestamp) startTimestamp = timestamp;
+      const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+      // Ease out cubic
+      const easedProgress = 1 - Math.pow(1 - progress, 3);
+      const current = Math.floor(easedProgress * (endValue - startValue) + startValue);
+      
+      setDisplayValue(current);
+      currentDisplayRef.current = current;
+      prevValuesMap.set(entryKey, current);
+      
+      if (progress < 1) {
+        window.requestAnimationFrame(step);
+      } else {
+        setDisplayValue(endValue);
+        currentDisplayRef.current = endValue;
+        prevValuesMap.set(entryKey, endValue);
+      }
+    };
+    
+    const req = window.requestAnimationFrame(step);
+    
+    return () => window.cancelAnimationFrame(req);
+  }, [value, entryKey]);
+
+  const pct = overallTotal > 0 ? Math.round((displayValue / overallTotal) * 100) : 0;
+
+  return (
+    <text
+      x={x + width + 10}
+      y={y + height / 2}
+      fill="var(--chart-tick-strong)"
+      fontSize={10}
+      fontFamily="inherit"
+      fontWeight={700}
+      textAnchor="start"
+      dominantBaseline="central"
+      className="font-numeric"
+    >
+      {formatK(displayValue)} ({pct}%)
+    </text>
+  );
+};
+
 export default function ModelChart({ data }: Props) {
   const { t } = useI18n();
+
   if (!data.length) {
     return (
-      <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">
+      <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm animate-pulse">
         {t("common.no_data")}
       </div>
     );
   }
 
   const overallTotal = data.reduce((s, d) => s + d.totalTokens, 0);
+  const overallMaxTokens = Math.max(...data.map(d => d.totalTokens), 1);
   
   // Group data by source
   const groups = PLATFORMS.map(p => {
@@ -89,35 +158,35 @@ export default function ModelChart({ data }: Props) {
       .sort((a, b) => b.totalTokens - a.totalTokens);
     
     const platformTotal = models.reduce((s, m) => s + m.totalTokens, 0);
-    const maxInGroup = models.length > 0 ? models[0].totalTokens : 0;
 
     return {
       ...p,
       models: models.map(m => ({
         ...m,
-        groupMax: maxInGroup,
-        fillColor: calculateBarColor(p.color, (m.totalTokens / (maxInGroup || 1)) * 100, m.totalTokens === maxInGroup)
+        fillColor: calculateBarColor(p.color, (m.totalTokens / overallMaxTokens) * 100, m.totalTokens === overallMaxTokens)
       })),
       platformTotal
     };
-  }).filter(g => g.models.length > 0);
+  })
+    .filter(g => g.models.length > 0)
+    .sort((a, b) => b.platformTotal - a.platformTotal);
 
   return (
     <div className="space-y-8">
       {groups.map(group => (
-        <div key={group.id} className="space-y-3">
+        <div key={group.id} className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-700">
           {/* Platform Header with Total */}
           <div className="flex items-center justify-between border-b border-border/50 pb-2">
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-lg bg-muted flex items-center justify-center overflow-hidden">
+              <div className="w-6 h-6 rounded-lg bg-muted flex items-center justify-center overflow-hidden shadow-sm">
                 <Image src={group.icon} alt={group.label} width={16} height={16} style={{ width: 16, height: 16, objectFit: "contain", transform: (group.id === "codex" || group.id === "github_copilot") ? "scale(1.35)" : undefined }} />
               </div>
               <span className="text-[13px] font-bold text-foreground">{group.label}</span>
             </div>
             <div className="flex items-center gap-2 text-[12px]">
-              <span className="text-[#8e8e93] font-medium">{t("common.total")}:</span>
+              <span className="text-muted-foreground font-medium">{t("common.total")}:</span>
               <span className="font-numeric font-bold text-foreground">{formatK(group.platformTotal)}</span>
-              <span className="text-[#aeaeb2] dark:text-[#6e6e72] text-[10px]">({Math.round((group.platformTotal / overallTotal) * 100)}%)</span>
+              <span className="text-muted-foreground/60 text-[10px]">({Math.round((group.platformTotal / overallTotal) * 100)}%)</span>
             </div>
           </div>
 
@@ -127,35 +196,46 @@ export default function ModelChart({ data }: Props) {
               <BarChart
                 data={group.models}
                 layout="vertical"
-                margin={{ top: 0, right: 40, left: 4, bottom: 0 }}
+                margin={{ top: 0, right: 90, left: 4, bottom: 0 }}
                 barSize={16}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" horizontal={false} />
                 <XAxis
                   type="number"
+                  domain={[0, overallMaxTokens]}
                   hide
                 />
                 <YAxis
                   type="category"
                   dataKey="label"
-                  tick={{ fontSize: 11, fill: "var(--chart-tick-strong)", fontFamily: "inherit" }}
+                  tick={{ fontSize: 11, fill: "var(--chart-tick-strong)", fontFamily: "inherit", fontWeight: 500 }}
                   axisLine={false}
                   tickLine={false}
                   width={100}
                 />
-                <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--chart-grid)" }} />
-                <Bar dataKey="totalTokens" radius={[0, 4, 4, 0]}>
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--chart-grid)", opacity: 0.4 }} />
+                <Bar 
+                  dataKey="totalTokens" 
+                  radius={[0, 4, 4, 0]}
+                  isAnimationActive={true}
+                  animationDuration={1500}
+                  animationEasing="ease-out"
+                >
                   {group.models.map((entry) => (
                     <Cell key={entry.model} fill={entry.fillColor} />
                   ))}
                   <LabelList
                     dataKey="totalTokens"
-                    position="right"
-                    style={{ fontSize: 10, fill: "var(--chart-tick)", fontFamily: "inherit", fontWeight: 600 }}
-                    formatter={(v) => {
-                      const n = Number(v) || 0;
-                      const pct = Math.round((n / group.platformTotal) * 100);
-                      return `${formatK(n)} (${pct}%)`;
+                    content={(props: any) => {
+                      const entry = group.models[props.index];
+                      return (
+                        <AnimatedLabel 
+                          key={`label-${entry?.model || props.index}`} 
+                          {...props} 
+                          overallTotal={overallTotal}
+                          entryKey={entry?.model || props.index}
+                        />
+                      );
                     }}
                   />
                 </Bar>

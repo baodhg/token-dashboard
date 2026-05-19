@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import type { DataPoint, Period } from "@/lib/mock-data";
@@ -22,15 +22,15 @@ function formatK(n: number) {
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-card rounded-xl shadow-lg border border-border px-4 py-3 text-sm min-w-35">
+    <div className="bg-card/95 backdrop-blur-sm rounded-xl shadow-xl border border-border px-4 py-3 text-sm min-w-40">
       <p className="font-semibold text-foreground mb-2 font-numeric">{label}</p>
-      {payload.map((p: { name: string; value: number; color: string }) => (
-        <div key={p.name} className="flex items-center justify-between gap-4 mb-0.5">
-          <div className="flex items-center gap-1.5 text-[#3c3c43] dark:text-[#c7c7cc]">
+      {payload.map((p: { name: string; value: number; color: string; dataKey: string }) => (
+        <div key={p.dataKey} className="flex items-center justify-between gap-4 mb-0.5">
+          <div className="flex items-center gap-1.5 text-muted-foreground">
             <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
             <span className="text-[11px]">{p.name}</span>
           </div>
-          <span className="font-numeric text-[12px] font-semibold text-foreground">{formatK(p.value)}</span>
+          <span className="font-numeric text-[12px] font-bold text-foreground">{formatK(p.value)}</span>
         </div>
       ))}
     </div>
@@ -40,10 +40,10 @@ function CustomTooltip({ active, payload, label }: any) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CustomLegend({ payload }: any) {
   return (
-    <div className="flex items-center gap-5 justify-end mb-2">
+    <div className="flex items-center gap-5 justify-end mb-4">
       {payload?.map((p: { value: string; color: string }) => (
-        <span key={p.value} className="flex items-center gap-1.5 text-[11px] text-[#8e8e93] dark:text-[#98989d]">
-          <span className="w-8 h-0.5 inline-block rounded-full" style={{ background: p.color }} />
+        <span key={p.value} className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+          <span className="w-3 h-3 rounded-sm inline-block" style={{ background: p.color }} />
           {p.value}
         </span>
       ))}
@@ -52,15 +52,19 @@ function CustomLegend({ payload }: any) {
 }
 
 const X_INTERVAL: Record<Exclude<Period, "custom">, number> = {
-  "1d": 3,   // every 4 hours â†’ 6 labels
-  "3d": 2,   // every 3rd point â†’ 4 labels
+  "1d": 239, // Labels every 4 hours (240 mins) if data is per minute
+  "3d": 2,   
   "1w": 0,
-  "1m": 4,   // every 5 days â†’ 6 labels
-  "all": 3,  // every 4 months â†’ 6 labels
+  "1m": 4,   
+  "all": 3,  
 };
 
 function getInterval(p: Period, len: number) {
   if (p === "custom") return Math.max(0, Math.floor(len / 8));
+  if (p === "1d") {
+    // If it's 1d and data is per-minute (1440 points), show label every 4h (240 mins)
+    return len > 1000 ? 239 : 3;
+  }
   return X_INTERVAL[p] ?? 0;
 }
 
@@ -69,17 +73,27 @@ export default function TokenChart({ data, period }: Props) {
   const maxVal = Math.max(...data.map(d => d.input + d.output), 1);
   const ticks = Array.from({ length: 5 }, (_, i) => Math.round((maxVal / 4) * i));
 
-  const needsAngle = period === "1m" || period === "1d" || period === "all" || (period === "custom" && data.length > 7);
+  const needsAngle = period === "1m" || (period === "1d" && data.length < 1000) || period === "all" || (period === "custom" && data.length > 7);
 
   return (
-    <ResponsiveContainer width="100%" height={280}>
-      <LineChart data={data} margin={{ top: 20, right: 8, left: 4, bottom: needsAngle ? 16 : 0 }}>
+    <ResponsiveContainer width="100%" height={300}>
+      <AreaChart data={data} margin={{ top: 20, right: 8, left: 4, bottom: needsAngle ? 16 : 0 }}>
+        <defs>
+          <linearGradient id="colorInput" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+            <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+          </linearGradient>
+          <linearGradient id="colorOutput" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#a855f7" stopOpacity={0.3}/>
+            <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
+          </linearGradient>
+        </defs>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
         <XAxis
           dataKey="label"
           interval={getInterval(period, data.length)}
           tick={{
-            fontSize: 11,
+            fontSize: 10,
             fill: "var(--chart-tick)",
             fontFamily: "inherit",
             ...(needsAngle ? { angle: -35, textAnchor: "end", dy: 4 } : {}),
@@ -91,33 +105,37 @@ export default function TokenChart({ data, period }: Props) {
         <YAxis
           ticks={ticks}
           tickFormatter={formatK}
-          domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.15)]}
-          tick={{ fontSize: 11, fill: "var(--chart-tick)", fontFamily: "inherit" }}
+          domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.1)]}
+          tick={{ fontSize: 10, fill: "var(--chart-tick)", fontFamily: "inherit" }}
           axisLine={false}
           tickLine={false}
-          width={56}
+          width={45}
         />
         <Tooltip content={<CustomTooltip />} />
         <Legend content={<CustomLegend />} verticalAlign="top" />
-        <Line
-          type="linear"
+        <Area
+          type="monotone"
           dataKey="input"
           name={t("common.input")}
           stroke="#6366f1"
-          strokeWidth={2}
+          strokeWidth={2.5}
+          fillOpacity={1}
+          fill="url(#colorInput)"
           dot={false}
-          activeDot={{ r: 4, strokeWidth: 0, fill: "#6366f1" }}
+          activeDot={{ r: 5, strokeWidth: 0, fill: "#6366f1" }}
         />
-        <Line
-          type="linear"
+        <Area
+          type="monotone"
           dataKey="output"
           name={t("common.output")}
           stroke="#a855f7"
-          strokeWidth={2}
+          strokeWidth={2.5}
+          fillOpacity={1}
+          fill="url(#colorOutput)"
           dot={false}
-          activeDot={{ r: 4, strokeWidth: 0, fill: "#a855f7" }}
+          activeDot={{ r: 5, strokeWidth: 0, fill: "#a855f7" }}
         />
-      </LineChart>
+      </AreaChart>
     </ResponsiveContainer>
   );
 }

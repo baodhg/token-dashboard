@@ -52,9 +52,9 @@ function buildChartData(
     
     if (diffDays <= 1) {
        config = {
-         count: 24,
-         labelFn: (i) => `${String(i).padStart(2, "0")}:00`,
-         bucketFn: (ts) => ts.getHours(),
+         count: 1440,
+         labelFn: (i) => `${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}`,
+         bucketFn: (ts) => ts.getHours() * 60 + ts.getMinutes(),
        };
     } else if (diffDays <= 31) {
        config = {
@@ -77,9 +77,9 @@ function buildChartData(
   } else {
     const configs: Record<Exclude<Period, "custom">, Cfg> = {
       "1d": {
-        count: 24,
-        labelFn: (i) => `${String(i).padStart(2, "0")}:00`,
-        bucketFn: (ts) => ts.getHours(),
+        count: 1440,
+        labelFn: (i) => `${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}`,
+        bucketFn: (ts) => ts.getHours() * 60 + ts.getMinutes(),
       },
       "3d": {
         count: 12,
@@ -179,7 +179,7 @@ export async function GET(request: NextRequest) {
     ...(sourceFilter !== "all" ? { source: sourceFilter } : {}),
   };
 
-  const [rows, agg, rawSessions, rawProjects, rawModels, rawPlatforms] = await Promise.all([
+  const [rows, agg, rawSessions, rawProjects, rawModels, rawPlatforms, rawCalls] = await Promise.all([
     prisma.call.findMany({
       where,
       select: { inputTokens: true, outputTokens: true, cacheTokens: true, timestamp: true },
@@ -198,7 +198,7 @@ export async function GET(request: NextRequest) {
       _min: { timestamp: true },
       _count: { id: true },
       orderBy: [{ _min: { timestamp: "desc" } }],
-      take: 20,
+      take: period === "1d" ? 100 : 20,
     }),
 
     prisma.call.groupBy({
@@ -223,6 +223,12 @@ export async function GET(request: NextRequest) {
       where: { timestamp: { gte: since, lte: toDate } }, // always all sources for platform overview
       _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
       _count: { id: true },
+    }),
+
+    prisma.call.findMany({
+      where,
+      orderBy: { timestamp: "desc" },
+      take: period === "1d" ? 50 : 0,
     }),
   ]);
 
@@ -311,5 +317,16 @@ export async function GET(request: NextRequest) {
     totalTokens: (p._sum.inputTokens ?? 0) + (p._sum.outputTokens ?? 0),
   }));
 
-  return Response.json({ chartData, summary, sessionStats, projectStats, modelStats, platformStats });
+  const recentCalls = rawCalls.map(c => ({
+    id: c.id,
+    model: c.model,
+    source: c.source,
+    project: cleanProject(c.project, c.source),
+    timestamp: c.timestamp.toISOString(),
+    input: c.inputTokens,
+    output: c.outputTokens,
+    cost: c.cost,
+  }));
+
+  return Response.json({ chartData, summary, sessionStats, projectStats, modelStats, platformStats, recentCalls });
 }

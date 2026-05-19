@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from "recharts";
 import type { DataPoint, Period } from "@/lib/mock-data";
@@ -23,14 +23,14 @@ function CustomTooltip({ active, payload, label }: any) {
   const { t } = useI18n();
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-card rounded-xl shadow-lg border border-border px-4 py-3 text-sm min-w-35">
+    <div className="bg-card/95 backdrop-blur-sm rounded-xl shadow-xl border border-border px-4 py-3 text-sm min-w-35">
       <p className="font-semibold text-foreground mb-1 font-numeric">{label}</p>
       <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-1.5 text-[#3c3c43] dark:text-[#c7c7cc]">
+        <div className="flex items-center gap-1.5 text-muted-foreground">
           <span className="w-2 h-2 rounded-full shrink-0 bg-cyan-500" />
           <span className="text-[11px]">{t("common.cache_read")}</span>
         </div>
-        <span className="font-numeric text-[12px] font-semibold text-foreground">
+        <span className="font-numeric text-[12px] font-bold text-foreground">
           {formatK(payload[0].value)}
         </span>
       </div>
@@ -39,7 +39,7 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 const X_INTERVAL: Record<Exclude<Period, "custom">, number> = {
-  "1d": 3,
+  "1d": 239,
   "3d": 2,
   "1w": 0,
   "1m": 4,
@@ -48,26 +48,34 @@ const X_INTERVAL: Record<Exclude<Period, "custom">, number> = {
 
 function getInterval(p: Period, len: number) {
   if (p === "custom") return Math.max(0, Math.floor(len / 8));
+  if (p === "1d") {
+    return len > 1000 ? 239 : 3;
+  }
   return X_INTERVAL[p] ?? 0;
 }
 
 export default function CacheChart({ data, period }: Props) {
   const { t } = useI18n();
-  const needsAngle = period === "1m" || period === "1d" || period === "all" || (period === "custom" && data.length > 7);
+  const needsAngle = period === "1m" || (period === "1d" && data.length < 1000) || period === "all" || (period === "custom" && data.length > 7);
 
   return (
     <ResponsiveContainer width="100%" height={256}>
-      <BarChart
+      <AreaChart
         data={data}
         margin={{ top: 20, right: 8, left: 4, bottom: needsAngle ? 16 : 0 }}
-        barSize={period === "1d" ? 16 : (period === "1m" || period === "all") ? 12 : 28}
       >
+        <defs>
+          <linearGradient id="colorCache" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3}/>
+            <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
+          </linearGradient>
+        </defs>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
         <XAxis
           dataKey="label"
           interval={getInterval(period, data.length)}
           tick={{
-            fontSize: 11,
+            fontSize: 10,
             fill: "var(--chart-tick)",
             fontFamily: "inherit",
             ...(needsAngle ? { angle: -35, textAnchor: "end", dy: 4 } : {}),
@@ -79,14 +87,24 @@ export default function CacheChart({ data, period }: Props) {
         <YAxis
           tickFormatter={formatK}
           domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.15)]}
-          tick={{ fontSize: 11, fill: "var(--chart-tick)", fontFamily: "inherit" }}
+          tick={{ fontSize: 10, fill: "var(--chart-tick)", fontFamily: "inherit" }}
           axisLine={false}
           tickLine={false}
-          width={56}
+          width={45}
         />
-        <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(6,182,212,0.06)" }} />
-        <Bar dataKey="cache" name={t("common.cache_read")} fill="#06b6d4" radius={[3, 3, 0, 0]} />
-      </BarChart>
+        <Tooltip content={<CustomTooltip />} />
+        <Area
+          type="monotone"
+          dataKey="cache"
+          name={t("common.cache_read")}
+          stroke="#06b6d4"
+          strokeWidth={2}
+          fillOpacity={1}
+          fill="url(#colorCache)"
+          dot={false}
+          activeDot={{ r: 5, strokeWidth: 0, fill: "#06b6d4" }}
+        />
+      </AreaChart>
     </ResponsiveContainer>
   );
 }

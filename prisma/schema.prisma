@@ -8,21 +8,38 @@ datasource db {
 }
 
 model Call {
-  id           String   @id           // requestId
-  model        String
-  inputTokens  Int      @default(0)
-  outputTokens Int      @default(0)
-  cacheTokens  Int      @default(0)
-  cost         Float    @default(0)
-  timestamp    DateTime
-  sessionId    String?
-  project      String?
-  source       String   @default("claude_code")
+  id              String   @id           // requestId
+  model           String
+  inputTokens     Int      @default(0)
+  outputTokens    Int      @default(0)
+  cacheTokens     Int      @default(0)
+  cost            Float    @default(0)
+  unitPriceInput  Float    @default(0)   // Price per 1M tokens at time of call
+  unitPriceOutput Float    @default(0)   // Price per 1M tokens at time of call
+  priceMetadata   String?                // e.g., "gemini-1.5-pro-paid-v1"
+  timestamp       DateTime
+  sessionId       String?
+  project         String?
+  source          String   @default("claude_code")
 
   @@index([timestamp])
   @@index([model])
   @@index([source])
   @@map("calls")
+}
+
+model PriceConfig {
+  id              String   @id @default(uuid())
+  source          String   // e.g., "gemini", "codex", "claude_code"
+  modelPattern    String   // e.g., "pro", "flash", "opus", "*"
+  unitPriceInput  Float
+  unitPriceOutput Float
+  unitPriceCache  Float    @default(0)
+  version         String   // e.g., "2024-v1"
+  isCurrent       Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  @@map("price_configs")
 }
 
 model SyncState {

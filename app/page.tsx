@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
@@ -21,7 +21,7 @@ const ModelChart = dynamic<{ data: ModelStat[] }>(
   () => import("@/components/ModelChart"), { ssr: false }
 );
 
-/* â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── helpers ────────────────────────────────────────── */
 
 function formatK(n: number) {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
@@ -38,7 +38,7 @@ function fmtTime(iso: string, locale: string) {
   });
 }
 
-/* â”€â”€â”€ types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── types ──────────────────────────────────────────── */
 
 type Source = "all" | "claude_code" | "cline" | "codex" | "gemini" | "github_copilot" | "cursor";
 
@@ -74,6 +74,10 @@ interface ApiData {
   projectStats:  ProjectStat[];
   modelStats:    ModelStat[];
   platformStats: PlatformStat[];
+  recentCalls:   {
+    id: string; model: string; source: string; project: string; 
+    timestamp: string; input: number; output: number; cost: number;
+  }[];
 }
 
 const EMPTY_SUMMARY: Summary = {
@@ -252,7 +256,7 @@ function AgentLogo() {
   );
 }
 
-/* â”€â”€â”€ page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── page ─────────────────────────────────────────────── */
 
 export default function DashboardPage() {
   const { t, locale } = useI18n();
@@ -342,8 +346,6 @@ export default function DashboardPage() {
     fetch("/api/sync", { method: "POST" })
       .then(() => { 
         setLastSynced(Date.now()); 
-        // Trigger a re-fetch by manually calling the logic or just let the effect handle it if dependency changes
-        // Since we want to re-fetch immediately on sync, we can just trigger the effect by adding a sync counter or similar
       })
       .finally(() => setSyncing(false));
   };
@@ -379,8 +381,9 @@ export default function DashboardPage() {
   const sessionStats = data?.sessionStats ?? [];
   const projectStats = data?.projectStats ?? [];
   const modelStats   = data?.modelStats   ?? [];
+  const recentCalls  = data?.recentCalls   ?? [];
 
-  const [viewMode, setViewMode] = useState<"sessions" | "projects">("sessions");
+  const [viewMode, setViewMode] = useState<"sessions" | "projects" | "calls">("sessions");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<string>("totalCost");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -461,7 +464,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-background">
 
-      {/* â”€â”€ Header â”€â”€ */}
+      {/* ── Header ── */}
       <header className="bg-card border-b border-border sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between gap-4">
 
@@ -476,7 +479,10 @@ export default function DashboardPage() {
             {PERIODS.map(({ key }) => (
               <button
                 key={key}
-                onClick={() => setPeriod(key)}
+                onClick={() => {
+                  setPeriod(key);
+                  if (key !== "1d" && viewMode === "calls") setViewMode("sessions");
+                }}
                 className={`shrink-0 px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-all cursor-pointer ${
                   period === key
                     ? "bg-foreground text-background shadow-sm"
@@ -532,7 +538,7 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* â”€â”€ Main â”€â”€ */}
+      {/* ── Main ── */}
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-5">
 
         {/* Source filter */}
@@ -646,6 +652,18 @@ export default function DashboardPage() {
               >
                 {t("common.recent_sessions")}
               </button>
+              {period === "1d" && (
+                <button
+                  onClick={() => setViewMode("calls")}
+                  className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all cursor-pointer ${
+                    viewMode === "calls" 
+                      ? "bg-card text-foreground shadow-xs" 
+                      : "text-[#8e8e93] hover:text-foreground"
+                  }`}
+                >
+                  Chi tiết lượt gọi
+                </button>
+              )}
               <button
                 onClick={() => setViewMode("projects")}
                 className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-all cursor-pointer ${
@@ -674,7 +692,9 @@ export default function DashboardPage() {
               <span className="text-[11px] text-[#aeaeb2] dark:text-[#6e6e72] whitespace-nowrap">
                 {viewMode === "sessions" 
                   ? `${sessionStats.length} ${t("common.sessions")}` 
-                  : `${filteredProjects.length} ${t("common.projects")}`}
+                  : viewMode === "calls"
+                    ? `${recentCalls.length} lượt gọi`
+                    : `${filteredProjects.length} ${t("common.projects")}`}
               </span>
             </div>
           </div>
@@ -730,6 +750,68 @@ export default function DashboardPage() {
                         </td>
                         <td className="font-numeric px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-semibold">
                           ${s.totalCost.toFixed(4)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : viewMode === "calls" ? (
+            recentCalls.length === 0 && !loading ? (
+              <div className="py-12 text-center text-[13px] text-[#aeaeb2] dark:text-[#6e6e72]">{t("common.no_data")}</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/20">
+                      {[
+                        { label: t("common.platform"), icon: null },
+                        { label: "Model", icon: null },
+                        { label: t("common.project"), icon: FolderOpen },
+                        { label: "Thời gian", icon: Clock },
+                        { label: "Input", icon: null },
+                        { label: "Output", icon: null },
+                        { label: t("common.cost"), icon: null },
+                      ].map(({ label, icon: Icon }) => (
+                        <th key={label} className="text-left px-4 py-3 text-[10px] font-bold text-[#aeaeb2] dark:text-[#6e6e72] uppercase tracking-wide whitespace-nowrap">
+                          <span className="flex items-center gap-1">
+                            {Icon && <Icon className="w-3 h-3" />}
+                            {label}</span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentCalls.map((c, i) => (
+                      <tr
+                        key={c.id}
+                        className={`hover:bg-muted/50 transition-colors ${
+                          i < recentCalls.length - 1 ? "border-b border-border" : ""
+                        }`}
+                      >
+                        <td className="px-4 py-2.5">
+                          <SourceBadge source={c.source} />
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className="font-medium text-foreground">{c.model}</span>
+                        </td>
+                        <td className="px-4 py-2.5 max-w-35">
+                          <span className="block truncate text-[#3c3c43] dark:text-[#c7c7cc]" title={c.project}>
+                            {c.project}
+                          </span>
+                        </td>
+                        <td className="font-numeric px-4 py-2.5 text-[#8e8e93] dark:text-[#98989d] whitespace-nowrap">
+                          {fmtTime(c.timestamp, locale)}
+                        </td>
+                        <td className="font-numeric px-4 py-2.5 text-foreground">
+                          {formatK(c.input)}
+                        </td>
+                        <td className="font-numeric px-4 py-2.5 text-foreground">
+                          {formatK(c.output)}
+                        </td>
+                        <td className="font-numeric px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                          ${c.cost.toFixed(5)}
                         </td>
                       </tr>
                     ))}
@@ -809,18 +891,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

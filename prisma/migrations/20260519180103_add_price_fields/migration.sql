@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "calls" ADD COLUMN     "priceMetadata" TEXT,
+ADD COLUMN     "unitPriceInput" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "unitPriceOutput" DOUBLE PRECISION NOT NULL DEFAULT 0;

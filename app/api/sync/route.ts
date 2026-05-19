@@ -4,20 +4,62 @@ import { homedir, tmpdir } from "os";
 import { prisma } from "@/lib/db";
 import Database from "better-sqlite3";
 
-/* ─── Claude Code cost table ──────────────────────────── */
+/* ─── Pricing helpers ────────────────────────────────── */
 
-const MODEL_COST: Record<string, { input: number; output: number }> = {
-  "claude-opus-4-7":           { input: 15,   output: 75   },
-  "claude-opus-4-5":           { input: 15,   output: 75   },
-  "claude-sonnet-4-6":         { input: 3,    output: 15   },
-  "claude-sonnet-4-5":         { input: 3,    output: 15   },
-  "claude-haiku-4-5":          { input: 0.25, output: 1.25 },
-  "claude-haiku-4-5-20251001": { input: 0.25, output: 1.25 },
-};
+async function getPriceConfigs() {
+  const configs = await prisma.priceConfig.findMany({ where: { isCurrent: true } });
+  return configs;
+}
 
-function calcCost(model: string, input: number, output: number) {
-  const r = MODEL_COST[model] ?? { input: 3, output: 15 };
-  return (input / 1_000_000) * r.input + (output / 1_000_000) * r.output;
+function findPrice(configs: any[], source: string, model: string) {
+  const modelLower = model.toLowerCase();
+  
+  // Try specific match first
+  let match = configs.find(c => c.source === source && modelLower.includes(c.modelPattern.toLowerCase()) && c.modelPattern !== "*");
+  
+  // Try wildcard match for source
+  if (!match) {
+    match = configs.find(c => c.source === source && c.modelPattern === "*");
+  }
+  
+  // Fallback
+  return match || { unitPriceInput: 0, unitPriceOutput: 0, unitPriceCache: 0, version: "unknown" };
+}
+
+async function backfillMissingCosts() {
+  try {
+    const missing = await prisma.call.findMany({
+      where: { unitPriceInput: 0 },
+      take: 500 // Process in chunks to avoid timeouts
+    });
+
+    if (missing.length === 0) return 0;
+
+    const configs = await getPriceConfigs();
+    let updated = 0;
+
+    for (const call of missing) {
+      const price = findPrice(configs, call.source, call.model);
+      const cost = (call.inputTokens / 1_000_000) * price.unitPriceInput + 
+                   (call.outputTokens / 1_000_000) * price.unitPriceOutput + 
+                   (call.cacheTokens / 1_000_000) * price.unitPriceCache;
+
+      await prisma.call.update({
+        where: { id: call.id },
+        data: {
+          cost,
+          unitPriceInput: price.unitPriceInput,
+          unitPriceOutput: price.unitPriceOutput,
+          priceMetadata: price.version
+        }
+      });
+      updated++;
+    }
+    return updated;
+  } catch (err) {
+    console.error("Backfill failed:", err);
+    return 0;
+  }
 }
 
 /* ─── Claude Code JSONL format ────────────────────────── */
@@ -39,7 +81,7 @@ interface JournalEntry {
   cwd?: string;
 }
 
-async function syncClaudeFile(filePath: string, projectName: string) {
+async function syncClaudeFile(filePath: string, projectName: string, priceConfigs: any[]) {
   const fileStat = await stat(filePath);
   const currentSize = BigInt(fileStat.size);
 
@@ -77,11 +119,11 @@ async function syncClaudeFile(filePath: string, projectName: string) {
     const input      = (u.input_tokens ?? 0) + cacheRead + cacheWrite;
     const output     = u.output_tokens ?? 0;
 
-    // Cost calculation: Input tokens are charged, cache reads are cheaper, cache creation is charged as input
-    const r = MODEL_COST[model] ?? { input: 3, output: 15 };
-    const cost = ((u.input_tokens ?? 0) + cacheWrite) / 1_000_000 * r.input + 
-                 (output / 1_000_000) * r.output + 
-                 (cacheRead / 1_000_000) * (r.input * 0.1); // Cache read is typically 10% of input cost
+    // Use DB pricing
+    const price = findPrice(priceConfigs, "claude_code", model);
+    const cost = ((u.input_tokens ?? 0) + cacheWrite) / 1_000_000 * price.unitPriceInput + 
+                 (output / 1_000_000) * price.unitPriceOutput + 
+                 (cacheRead / 1_000_000) * price.unitPriceCache;
 
     toUpsert.push({
       where:  { id: entry.requestId },
@@ -93,6 +135,9 @@ async function syncClaudeFile(filePath: string, projectName: string) {
         outputTokens: output,
         cacheTokens:  cacheRead,
         cost:         cost,
+        unitPriceInput:  price.unitPriceInput,
+        unitPriceOutput: price.unitPriceOutput,
+        priceMetadata:   price.version,
         timestamp:    new Date(entry.timestamp),
         sessionId:    entry.sessionId ?? null,
         project:      projectName,
@@ -269,7 +314,7 @@ function extractProject(cwd: string | undefined): string | null {
   return parts[parts.length - 1] ?? null;
 }
 
-async function syncCodexSessions(): Promise<number> {
+async function syncCodexSessions(priceConfigs: any[]): Promise<number> {
   const sessionsDir = join(homedir(), ".codex", "sessions");
 
   let years: string[];
@@ -310,7 +355,7 @@ async function syncCodexSessions(): Promise<number> {
 
         for (const file of files) {
           const filePath = join(dayPath, file);
-          try { totalNew += await syncCodexFile(filePath, file); } catch { /* skip */ }
+          try { totalNew += await syncCodexFile(filePath, file, priceConfigs); } catch { /* skip */ }
         }
       }
     }
@@ -319,7 +364,7 @@ async function syncCodexSessions(): Promise<number> {
   return totalNew;
 }
 
-async function syncCodexFile(filePath: string, fileName: string): Promise<number> {
+async function syncCodexFile(filePath: string, fileName: string, priceConfigs: any[]): Promise<number> {
   const fileStat = await stat(filePath);
   const currentSize = BigInt(fileStat.size);
 
@@ -337,7 +382,7 @@ async function syncCodexFile(filePath: string, fileName: string): Promise<number
   await fh.close();
 
   // extract session UUID from filename: rollout-DATE-{uuid}.jsonl
-  const uuidMatch = fileName.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
+  const uuidMatch = fileName.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
   const sessionId = uuidMatch ? uuidMatch[1] : fileName.replace(".jsonl", "");
 
   // if first read, also parse session_meta from start of file for project/model
@@ -357,7 +402,11 @@ async function syncCodexFile(filePath: string, fileName: string): Promise<number
   }
 
   const lines = buf.toString("utf-8").split("\n");
-  const toCreate: { id: string; model: string; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number; timestamp: Date; sessionId: string; project: string | null; source: string }[] = [];
+  const toCreate: { 
+    id: string; model: string; inputTokens: number; outputTokens: number; cacheTokens: number; 
+    cost: number; unitPriceInput: number; unitPriceOutput: number; priceMetadata: string;
+    timestamp: Date; sessionId: string; project: string | null; source: string 
+  }[] = [];
   const seen = new Set<string>();
 
   for (const line of lines) {
@@ -380,13 +429,19 @@ async function syncCodexFile(filePath: string, fileName: string): Promise<number
     if (seen.has(id)) continue;
     seen.add(id);
 
+    const price = findPrice(priceConfigs, "codex", model);
+    const cost = (input / 1_000_000) * price.unitPriceInput + (output / 1_000_000) * price.unitPriceOutput;
+
     toCreate.push({
       id,
       model,
       inputTokens:  input,
       outputTokens: output,
       cacheTokens:  cache,
-      cost:         0, // subscription model — no per-token pricing
+      cost:         cost,
+      unitPriceInput:  price.unitPriceInput,
+      unitPriceOutput: price.unitPriceOutput,
+      priceMetadata:   price.version,
       timestamp:    new Date(entry.timestamp),
       sessionId:    `codex_${sessionId}`,
       project,
@@ -425,7 +480,7 @@ interface GeminiEntry {
   model?: string;
 }
 
-async function syncGeminiSessions(): Promise<number> {
+async function syncGeminiSessions(priceConfigs: any[]): Promise<number> {
   const geminiDir = join(homedir(), ".gemini", "tmp");
 
   let projects: string[];
@@ -451,7 +506,7 @@ async function syncGeminiSessions(): Promise<number> {
     for (const file of files) {
       const filePath = join(chatsDir, file);
       try {
-        totalNew += await syncGeminiFile(filePath, proj);
+        totalNew += await syncGeminiFile(filePath, proj, priceConfigs);
       } catch { /* skip unreadable */ }
     }
   }
@@ -459,7 +514,7 @@ async function syncGeminiSessions(): Promise<number> {
   return totalNew;
 }
 
-async function syncGeminiFile(filePath: string, projectName: string): Promise<number> {
+async function syncGeminiFile(filePath: string, projectName: string, priceConfigs: any[]): Promise<number> {
   const fileStat = await stat(filePath);
   const currentSize = BigInt(fileStat.size);
 
@@ -476,7 +531,11 @@ async function syncGeminiFile(filePath: string, projectName: string): Promise<nu
   await fh.close();
 
   const lines = buf.toString("utf-8").split("\n");
-  const toCreate: { id: string; model: string; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number; timestamp: Date; sessionId: string; project: string | null; source: string }[] = [];
+  const toCreate: { 
+    id: string; model: string; inputTokens: number; outputTokens: number; cacheTokens: number; 
+    cost: number; unitPriceInput: number; unitPriceOutput: number; priceMetadata: string;
+    timestamp: Date; sessionId: string; project: string | null; source: string 
+  }[] = [];
   const seen = new Set<string>();
 
   // For sessionId, we can try to extract it from the first line or filename
@@ -505,13 +564,21 @@ async function syncGeminiFile(filePath: string, projectName: string): Promise<nu
     if (seen.has(id)) continue;
     seen.add(id);
 
+    const price = findPrice(priceConfigs, "gemini", model);
+    const cost = (input / 1_000_000) * price.unitPriceInput + 
+                 (output / 1_000_000) * price.unitPriceOutput + 
+                 (cache / 1_000_000) * price.unitPriceCache;
+
     toCreate.push({
       id,
       model,
       inputTokens:  input,
       outputTokens: output,
       cacheTokens:  cache,
-      cost:         0, // Typically free or different pricing for Gemini CLI
+      cost:         cost,
+      unitPriceInput:  price.unitPriceInput,
+      unitPriceOutput: price.unitPriceOutput,
+      priceMetadata:   price.version,
       timestamp:    new Date(entry.timestamp),
       sessionId:    `gemini_${sessionId}`,
       project:      projectName,
@@ -819,6 +886,10 @@ async function syncCursorDb(dbPath: string, wsId: string): Promise<number> {
 /* ─── POST handler ────────────────────────────────────── */
 
 export async function POST() {
+  // Automate backfill and ensure price configs exist
+  await backfillMissingCosts();
+  const priceConfigs = await getPriceConfigs();
+
   const projectsDir = join(homedir(), ".claude", "projects");
 
   let claudeNew = 0;
@@ -843,14 +914,14 @@ export async function POST() {
 
     for (const file of files) {
       try {
-        claudeNew += await syncClaudeFile(join(projPath, file), proj);
+        claudeNew += await syncClaudeFile(join(projPath, file), proj, priceConfigs);
       } catch { /* skip unreadable */ }
     }
   }
 
   const clineNew   = await syncClineTasks();
-  const codexNew   = await syncCodexSessions();
-  const geminiNew  = await syncGeminiSessions();
+  const codexNew   = await syncCodexSessions(priceConfigs);
+  const geminiNew  = await syncGeminiSessions(priceConfigs);
   const copilotNew = await syncCopilotSessions();
   const cursorNew  = await syncCursorSessions();
 
@@ -864,4 +935,3 @@ export async function POST() {
     cursor: cursorNew,
   });
 }
-

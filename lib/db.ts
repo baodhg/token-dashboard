@@ -6,8 +6,8 @@ function createPrisma() {
   return new PrismaClient({ adapter });
 }
 
-// schema v2 — clear stale singleton after prisma generate so hot-reload picks up new fields
-const SCHEMA_VER = "2";
+// schema v3 — clear stale singleton after prisma generate so hot-reload picks up new fields
+const SCHEMA_VER = "3";
 const g = globalThis as unknown as { prisma?: PrismaClient; prismaVer?: string };
 if (g.prismaVer !== SCHEMA_VER) { g.prisma = undefined; g.prismaVer = SCHEMA_VER; }
 
