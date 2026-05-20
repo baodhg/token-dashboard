@@ -114,34 +114,39 @@ async function syncClaudeFile(filePath: string, projectName: string, priceConfig
 
     const u = entry.message.usage;
     const model = entry.message.model ?? "unknown";
-    const cacheRead  = u.cache_read_input_tokens ?? 0;
-    const cacheWrite = u.cache_creation_input_tokens ?? 0;
-    const input      = (u.input_tokens ?? 0) + cacheRead + cacheWrite;
-    const output     = u.output_tokens ?? 0;
+    const cacheRead = u.cache_read_input_tokens ?? 0;
+    const freshInput = u.input_tokens ?? 0; // Tokens not from cache
+    const output = u.output_tokens ?? 0;
+
+    // Total logical input tokens = fresh (not in cache) + cached
+    const totalInput = freshInput + cacheRead;
 
     // Use DB pricing
     const price = findPrice(priceConfigs, "claude_code", model);
-    const cost = ((u.input_tokens ?? 0) + cacheWrite) / 1_000_000 * price.unitPriceInput + 
-                 (output / 1_000_000) * price.unitPriceOutput + 
-                 (cacheRead / 1_000_000) * price.unitPriceCache;
+
+    // Cost is calculated on fresh input tokens, output tokens, and cached tokens separately
+    const cost =
+      (freshInput / 1_000_000) * price.unitPriceInput +
+      (output / 1_000_000) * price.unitPriceOutput +
+      (cacheRead / 1_000_000) * price.unitPriceCache;
 
     toUpsert.push({
-      where:  { id: entry.requestId },
+      where: { id: entry.requestId },
       update: {},
       create: {
-        id:           entry.requestId,
+        id: entry.requestId,
         model,
-        inputTokens:  input,
+        inputTokens: totalInput, // Store the total logical input
         outputTokens: output,
-        cacheTokens:  cacheRead,
-        cost:         cost,
-        unitPriceInput:  price.unitPriceInput,
+        cacheTokens: cacheRead,
+        cost: cost,
+        unitPriceInput: price.unitPriceInput,
         unitPriceOutput: price.unitPriceOutput,
-        priceMetadata:   price.version,
-        timestamp:    new Date(entry.timestamp),
-        sessionId:    entry.sessionId ?? null,
-        project:      projectName,
-        source:       "claude_code",
+        priceMetadata: price.version,
+        timestamp: new Date(entry.timestamp),
+        sessionId: entry.sessionId ?? null,
+        project: projectName,
+        source: "claude_code",
       },
     });
   }
