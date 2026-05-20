@@ -132,7 +132,19 @@ async function syncClaudeFile(filePath: string, projectName: string, priceConfig
 
     toUpsert.push({
       where: { id: entry.requestId },
-      update: {},
+      update: {
+        model,
+        inputTokens: totalInput,
+        outputTokens: output,
+        cacheTokens: cacheRead,
+        cost: cost,
+        unitPriceInput: price.unitPriceInput,
+        unitPriceOutput: price.unitPriceOutput,
+        priceMetadata: price.version,
+        timestamp: new Date(entry.timestamp),
+        sessionId: entry.sessionId ?? null,
+        project: projectName,
+      },
       create: {
         id: entry.requestId,
         model,
@@ -263,7 +275,15 @@ async function syncClineTasks(): Promise<number> {
 
       toUpsert.push({
         where:  { id },
-        update: {},
+        update: {
+          model,
+          inputTokens:  input,
+          outputTokens: output,
+          cacheTokens:  cache,
+          cost:         parsed.cost,
+          timestamp:    new Date(msg.ts),
+          sessionId:    `cline_${taskId}`,
+        },
         create: {
           id,
           model,
