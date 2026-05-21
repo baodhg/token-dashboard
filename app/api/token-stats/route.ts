@@ -11,27 +11,56 @@ const PERIOD_MS: Record<Exclude<Period, "custom">, number> = {
 };
 
 const MODEL_LABEL: Record<string, string> = {
+  // Claude — base IDs and versioned suffixes (e.g. claude-opus-4-7-20250219)
   "claude-opus-4-7":           "Opus 4.7",
   "claude-opus-4-6":           "Opus 4.6",
   "claude-opus-4-5":           "Opus 4.5",
+  "claude-opus-4-1":           "Opus 4.1",
+  "claude-opus-4":             "Opus 4",
   "claude-sonnet-4-6":         "Sonnet 4.6",
   "claude-sonnet-4-5":         "Sonnet 4.5",
+  "claude-sonnet-4":           "Sonnet 4",
   "claude-haiku-4-5":          "Haiku 4.5",
   "claude-haiku-4-5-20251001": "Haiku 4.5",
-  "gemini-3-flash-preview":    "Flash 3 Preview",
-  "gemini-3.1-pro-preview":    "Pro 3.1 Preview",
-  "gemini-2.5-pro":            "Pro 2.5",
+  "claude-haiku-3-5":          "Haiku 3.5",
+
+  // Gemini CLI
+  "gemini-3.1-pro-preview":        "Pro 3.1",
+  "gemini-3-flash-preview":        "Flash 3",
+  "gemini-3.1-flash-lite-preview": "Flash Lite 3.1",
+  "gemini-2.5-pro":                "Pro 2.5",
+  "gemini-2.5-flash":              "Flash 2.5",
+  "gemini-2.5-flash-lite":         "Flash Lite 2.5",
+  "gemma-4-31b-it":                "Gemma 4 31B",
+  "gemma-4-26b-a4b-it":            "Gemma 4 26B",
+
+  // Antigravity CLI (Display Names)
+  "Gemini 3.5 Flash (High)":   "Anti: Flash 3.5 (H)",
+  "Gemini 3.5 Flash (Medium)": "Anti: Flash 3.5 (M)",
+  "Gemini 3.1 Pro (High)":     "Anti: Pro 3.1 (H)",
+  "Gemini 3.1 Pro (Low)":      "Anti: Pro 3.1 (L)",
+  "Claude Sonnet 4.6 (Thinking)": "Anti: Sonnet 4.6 (T)",
+  "Claude Opus 4.6 (Thinking)":   "Anti: Opus 4.6 (T)",
+  "GPT-OSS 120B (Medium)":     "Anti: GPT-OSS 120B",
+
+  // Others
   "openai/codex":              "OpenAI Codex",
   "cx/gpt-5.3-codex-xhigh":    "GPT-5.3 Codex",
   "codex":                     "Codex",
+  "cursor":                    "Cursor Default",
 };
 
 function modelLabel(model: string) {
-  return MODEL_LABEL[model] ?? model;
+  if (MODEL_LABEL[model]) return MODEL_LABEL[model];
+  // Versioned IDs like claude-opus-4-7-20250219 → match by prefix
+  for (const [key, label] of Object.entries(MODEL_LABEL)) {
+    if (model.startsWith(key + "-") || model.startsWith(key + "_")) return label;
+  }
+  return model;
 }
 
 function buildChartData(
-  calls: { inputTokens: number; outputTokens: number; cacheTokens: number; timestamp: Date }[],
+  calls: { inputTokens: number; cacheCreationTokens: number; outputTokens: number; cacheTokens: number; timestamp: Date }[],
   period: Period,
   now: number,
   customSince?: number,
@@ -124,7 +153,8 @@ function buildChartData(
   for (const c of calls) {
     const idx = bucketFn(c.timestamp);
     if (idx >= 0 && idx < count) {
-      buckets[idx].input  += c.inputTokens;
+      // input = fresh + cache_write (all non-cached tokens sent this turn)
+      buckets[idx].input  += c.inputTokens + c.cacheCreationTokens;
       buckets[idx].output += c.outputTokens;
       buckets[idx].cache  += c.cacheTokens;
     }
@@ -132,11 +162,25 @@ function buildChartData(
   return buckets;
 }
 
-function cleanProject(project: string | null, source: string): string {
-  if (!project) return source === "cline" ? "Cline" : "Unknown";
+function cleanProject(p: string | null, source: string): string {
+  if (!p) return source === "cline" ? "Cline" : "Unknown";
   const prefix = "c--users-admin-desktop-";
-  if (project.toLowerCase().startsWith(prefix)) return project.slice(prefix.length);
-  return project;
+  let name = p.toLowerCase().startsWith(prefix) ? p.slice(prefix.length) : p;
+  
+  if (name.includes('/') || name.includes('\\')) {
+      name = name.split(/[\\/]/).pop() || name;
+  }
+  
+  const map: Record<string, string> = {
+      "benhvien": "BenhVien",
+      "evcsm": "EVCSM",
+      "ev-charging": "EV Charging",
+      "tiximax-net": "TIXIMAX-NET",
+      "tiximax-be-2": "TIXIMAX-BE-2",
+  };
+  
+  const cleaned = map[name.toLowerCase()] || name;
+  return cleaned === "Unknown" ? "Unknown Project" : cleaned;
 }
 
 interface ProjectStat {
@@ -182,19 +226,19 @@ export async function GET(request: NextRequest) {
   const [rows, agg, rawSessions, rawProjects, rawModels, rawPlatforms, rawCalls] = await Promise.all([
     prisma.call.findMany({
       where,
-      select: { inputTokens: true, outputTokens: true, cacheTokens: true, timestamp: true },
+      select: { inputTokens: true, cacheCreationTokens: true, outputTokens: true, cacheTokens: true, timestamp: true },
     }),
 
     prisma.call.aggregate({
       where,
-      _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
+      _sum: { inputTokens: true, cacheCreationTokens: true, outputTokens: true, cacheTokens: true, cost: true },
       _count: { id: true },
     }),
 
     prisma.call.groupBy({
       by: ["sessionId", "project", "source"],
       where,
-      _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
+      _sum: { inputTokens: true, cacheCreationTokens: true, outputTokens: true, cacheTokens: true, cost: true },
       _min: { timestamp: true },
       _count: { id: true },
       orderBy: [{ _min: { timestamp: "desc" } }],
@@ -204,7 +248,7 @@ export async function GET(request: NextRequest) {
     prisma.call.groupBy({
       by: ["project", "source"],
       where,
-      _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
+      _sum: { inputTokens: true, cacheCreationTokens: true, outputTokens: true, cacheTokens: true, cost: true },
       _min: { timestamp: true },
       _max: { timestamp: true },
       _count: { id: true },
@@ -213,15 +257,15 @@ export async function GET(request: NextRequest) {
     prisma.call.groupBy({
       by: ["model", "source"],
       where,
-      _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
+      _sum: { inputTokens: true, cacheCreationTokens: true, outputTokens: true, cacheTokens: true, cost: true },
       _count: { id: true },
       orderBy: [{ _sum: { inputTokens: "desc" } }],
     }),
 
     prisma.call.groupBy({
       by: ["source"],
-      where: { timestamp: { gte: since, lte: toDate } }, // always all sources for platform overview
-      _sum: { inputTokens: true, outputTokens: true, cacheTokens: true, cost: true },
+      where: { timestamp: { gte: since, lte: toDate } },
+      _sum: { inputTokens: true, cacheCreationTokens: true, outputTokens: true, cacheTokens: true, cost: true },
       _count: { id: true },
     }),
 
@@ -235,12 +279,13 @@ export async function GET(request: NextRequest) {
   const chartData = buildChartData(rows, period, now, since.getTime(), toDate.getTime());
 
   const summary = {
-    totalInput:  agg._sum.inputTokens  ?? 0,
-    totalOutput: agg._sum.outputTokens ?? 0,
-    totalCache:  agg._sum.cacheTokens  ?? 0,
-    total: (agg._sum.inputTokens ?? 0) + (agg._sum.outputTokens ?? 0),
-    totalCost:   agg._sum.cost ?? 0,
-    callCount:   agg._count.id,
+    // input = fresh + cacheCreation (all non-cached tokens sent)
+    totalInput:  (agg._sum.inputTokens ?? 0) + (agg._sum.cacheCreationTokens ?? 0),
+    totalOutput:  agg._sum.outputTokens ?? 0,
+    totalCache:   agg._sum.cacheTokens  ?? 0,
+    total: (agg._sum.inputTokens ?? 0) + (agg._sum.cacheCreationTokens ?? 0) + (agg._sum.outputTokens ?? 0),
+    totalCost:    agg._sum.cost ?? 0,
+    callCount:    agg._count.id,
   };
 
   const sessionStats = rawSessions.map(s => ({
@@ -249,10 +294,10 @@ export async function GET(request: NextRequest) {
     source:      s.source,
     startTime:   s._min.timestamp?.toISOString() ?? "",
     callCount:   s._count.id,
-    totalInput:  s._sum.inputTokens  ?? 0,
-    totalOutput: s._sum.outputTokens ?? 0,
-    totalCache:  s._sum.cacheTokens  ?? 0,
-    totalCost:   s._sum.cost         ?? 0,
+    totalInput:  (s._sum.inputTokens ?? 0) + (s._sum.cacheCreationTokens ?? 0),
+    totalOutput:  s._sum.outputTokens ?? 0,
+    totalCache:   s._sum.cacheTokens  ?? 0,
+    totalCost:    s._sum.cost         ?? 0,
   }));
 
   const projectMap = new Map<string, ProjectStat>();
@@ -262,10 +307,10 @@ export async function GET(request: NextRequest) {
     if (existing) {
       if (!existing.sources.includes(p.source)) existing.sources.push(p.source);
       existing.callCount += p._count.id;
-      existing.totalInput += p._sum.inputTokens ?? 0;
+      existing.totalInput  += (p._sum.inputTokens ?? 0) + (p._sum.cacheCreationTokens ?? 0);
       existing.totalOutput += p._sum.outputTokens ?? 0;
-      existing.totalCache += p._sum.cacheTokens ?? 0;
-      existing.totalCost += p._sum.cost ?? 0;
+      existing.totalCache  += p._sum.cacheTokens  ?? 0;
+      existing.totalCost   += p._sum.cost          ?? 0;
       if (p._min.timestamp && new Date(p._min.timestamp) < new Date(existing.startTime)) {
         existing.startTime = p._min.timestamp.toISOString();
       }
@@ -274,15 +319,15 @@ export async function GET(request: NextRequest) {
       }
     } else {
       projectMap.set(name, {
-        project: name,
-        sources: [p.source],
-        startTime: p._min.timestamp?.toISOString() ?? "",
-        endTime: p._max.timestamp?.toISOString() ?? "",
-        callCount: p._count.id,
-        totalInput: p._sum.inputTokens ?? 0,
+        project:     name,
+        sources:     [p.source],
+        startTime:   p._min.timestamp?.toISOString() ?? "",
+        endTime:     p._max.timestamp?.toISOString() ?? "",
+        callCount:   p._count.id,
+        totalInput:  (p._sum.inputTokens ?? 0) + (p._sum.cacheCreationTokens ?? 0),
         totalOutput: p._sum.outputTokens ?? 0,
-        totalCache: p._sum.cacheTokens ?? 0,
-        totalCost: p._sum.cost ?? 0,
+        totalCache:  p._sum.cacheTokens  ?? 0,
+        totalCost:   p._sum.cost         ?? 0,
       });
     }
   });
@@ -294,27 +339,32 @@ export async function GET(request: NextRequest) {
     source:      m.source,
     label:       modelLabel(m.model),
     callCount:   m._count.id,
-    totalInput:  m._sum.inputTokens  ?? 0,
-    totalOutput: m._sum.outputTokens ?? 0,
-    totalCache:  m._sum.cacheTokens  ?? 0,
-    totalCost:   m._sum.cost         ?? 0,
-    totalTokens: (m._sum.inputTokens ?? 0) + (m._sum.outputTokens ?? 0),
+    totalInput:  (m._sum.inputTokens ?? 0) + (m._sum.cacheCreationTokens ?? 0),
+    totalOutput:  m._sum.outputTokens ?? 0,
+    totalCache:   m._sum.cacheTokens  ?? 0,
+    totalCost:    m._sum.cost         ?? 0,
+    totalTokens:  (m._sum.inputTokens ?? 0) + (m._sum.cacheCreationTokens ?? 0) + (m._sum.outputTokens ?? 0),
   }));
+
+  const SOURCE_LABEL: Record<string, string> = {
+    claude_code:    "Claude Code",
+    cline:          "Cline",
+    gemini:         "Gemini CLI",
+    antigravity_cli:"Antigravity CLI",
+    codex:          "Codex",
+    github_copilot: "GitHub Copilot",
+    cursor:         "Cursor",
+  };
 
   const platformStats = rawPlatforms.map(p => ({
     source:      p.source,
-    label:       p.source === "claude_code" ? "Claude Code" : 
-                 p.source === "cline" ? "Cline" : 
-                 p.source === "gemini" ? "Gemini CLI" :
-                 p.source === "codex" ? "Codex" :
-                 p.source === "github_copilot" ? "GitHub Copilot" : 
-                 p.source === "cursor" ? "Cursor" : p.source,
+    label:       SOURCE_LABEL[p.source] ?? p.source,
     callCount:   p._count.id,
-    totalInput:  p._sum.inputTokens  ?? 0,
-    totalOutput: p._sum.outputTokens ?? 0,
-    totalCache:  p._sum.cacheTokens  ?? 0,
-    totalCost:   p._sum.cost         ?? 0,
-    totalTokens: (p._sum.inputTokens ?? 0) + (p._sum.outputTokens ?? 0),
+    totalInput:  (p._sum.inputTokens ?? 0) + (p._sum.cacheCreationTokens ?? 0),
+    totalOutput:  p._sum.outputTokens ?? 0,
+    totalCache:   p._sum.cacheTokens  ?? 0,
+    totalCost:    p._sum.cost         ?? 0,
+    totalTokens:  (p._sum.inputTokens ?? 0) + (p._sum.cacheCreationTokens ?? 0) + (p._sum.outputTokens ?? 0),
   }));
 
   const recentCalls = rawCalls.map(c => ({

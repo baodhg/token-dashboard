@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import {
   Zap, ArrowDownLeft, ArrowUpRight, DollarSign,
   RefreshCw, Clock, FolderOpen, Sun, Moon, Laptop,
-  ChevronUp, ChevronDown, Search, Languages
+  ChevronUp, ChevronDown, Search, Languages, Calculator
 } from "lucide-react";
 import { PERIODS, type Period, type DataPoint } from "@/lib/mock-data";
 import type { ModelStat } from "@/components/ModelChart";
@@ -40,7 +40,7 @@ function fmtTime(iso: string, locale: string) {
 
 /* ─── types ──────────────────────────────────────────── */
 
-type Source = "all" | "claude_code" | "cline" | "codex" | "gemini" | "github_copilot" | "cursor";
+type Source = "all" | "claude_code" | "cline" | "codex" | "gemini" | "antigravity_cli" | "github_copilot" | "cursor";
 
 interface Summary {
   total: number; totalInput: number; totalOutput: number;
@@ -91,6 +91,7 @@ const SOURCE_LABELS: Record<Source, string> = {
   cline:         "Cline",
   codex:         "Codex",
   gemini:        "Gemini CLI",
+  antigravity_cli: "Antigravity CLI",
   github_copilot: "GitHub Copilot",
   cursor:        "Cursor",
 };
@@ -99,7 +100,8 @@ const SOURCE_COLORS: Record<string, string> = {
   claude_code:   "#ff8c42", // Vibrant Orange
   cline:         "#10b981", // Emerald Green
   codex:         "#8b5cf6", // Purple
-  gemini:        "#3b82f6", // Blue
+  gemini:        "#6366f1", // Indigo (changed from Blue to distinguish)
+  antigravity_cli: "#4285f4", // Google Blue
   github_copilot: "#06b6d4", // Brighter Cyan (Copilot Robot)
   cursor:        "#71717a", // Zinc (Cursor Cube)
 };
@@ -109,6 +111,7 @@ const SOURCE_ICONS: Record<string, string> = {
   cline:         "/cline.png",
   codex:         "/codex.png",
   gemini:        "/geminicli.png",
+  antigravity_cli: "/antigravity.png",
   github_copilot: "/github.png",
   cursor:        "/cursor.png",
 };
@@ -154,7 +157,13 @@ import Image from "next/image";
 
 function SourceBadge({ source }: { source: string }) {
   const brandColor = SOURCE_COLORS[source] ?? "#8e8e93";
-  const label = source === "claude_code" ? "Claude" : source === "cline" ? "Cline" : source === "codex" ? "Codex" : source === "gemini" ? "Gemini" : source === "github_copilot" ? "Copilot" : source === "cursor" ? "Cursor" : source;
+  const label = source === "claude_code" ? "Claude" : 
+                source === "cline" ? "Cline" : 
+                source === "codex" ? "Codex" : 
+                source === "gemini" ? "Gemini" : 
+                source === "antigravity_cli" ? "Antigravity" :
+                source === "github_copilot" ? "Copilot" : 
+                source === "cursor" ? "Cursor" : source;
   const iconSrc = SOURCE_ICONS[source];
 
   return (
@@ -170,12 +179,12 @@ function SourceBadge({ source }: { source: string }) {
         <Image 
           src={iconSrc} 
           alt={label} 
-          width={12} 
-          height={12} 
+          width={13} 
+          height={13} 
           className="opacity-100" 
           style={{ 
-            width: 12, 
-            height: 12, 
+            width: 13, 
+            height: 13, 
             objectFit: "contain", 
             transform: (source === "codex" || source === "github_copilot" || source === "cursor") ? "scale(1.3)" : undefined,
           }} 
@@ -264,8 +273,10 @@ export default function DashboardPage() {
   const [source, setSource]       = useState<Source>("all");
   const [data, setData]           = useState<ApiData | null>(null);
   const [loading, setLoading]     = useState(true);
-  const [syncing, setSyncing]     = useState(false);
-  const [lastSynced, setLastSynced] = useState<number | null>(null);
+  const [syncing, setSyncing]         = useState(false);
+  const [lastSynced, setLastSynced]   = useState<number | null>(null);
+  const [recalculating, setRecalculating] = useState(false);
+  const [recalcMsg, setRecalcMsg]     = useState<string | null>(null);
   const [theme, setTheme]         = useState<"light" | "dark" | "system">("system");
   const [customRange, setCustomRange] = useState(() => ({
     from: new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0],
@@ -344,10 +355,28 @@ export default function DashboardPage() {
   const handleSync = () => {
     setSyncing(true);
     fetch("/api/sync", { method: "POST" })
-      .then(() => { 
-        setLastSynced(Date.now()); 
+      .then(() => {
+        setLastSynced(Date.now());
       })
       .finally(() => setSyncing(false));
+  };
+
+  const handleRecalculate = () => {
+    setRecalculating(true);
+    setRecalcMsg(null);
+    fetch("/api/recalculate-prices", { method: "POST" })
+      .then(r => r.json())
+      .then((res: { updated?: number; skipped?: number; error?: string }) => {
+        if (res.error) { setRecalcMsg(`Error: ${res.error}`); return; }
+        setRecalcMsg(`Updated ${res.updated ?? 0} records`);
+        // Refresh stats to show updated costs
+        const qs = new URLSearchParams({ period, ...(source !== "all" ? { source } : {}) });
+        if (period === "custom") { qs.append("from", customRange.from); qs.append("to", customRange.to); }
+        fetch(`/api/token-stats?${qs}`).then(r => r.json()).then(setData).catch(() => {});
+        setTimeout(() => setRecalcMsg(null), 4000);
+      })
+      .catch(e => setRecalcMsg(`Error: ${e}`))
+      .finally(() => setRecalculating(false));
   };
 
   // Smart Polling
@@ -451,7 +480,7 @@ export default function DashboardPage() {
     },
     {
       label: t("common.estimated_cost"),
-      value: `$${summary.totalCost.toFixed(4)}`,
+      value: `$${(summary.totalCost || 0).toFixed(4)}`,
       sub:   t("common.reference_price"),
       icon: DollarSign,
       iconBg: "bg-emerald-50 dark:bg-emerald-500/15",
@@ -534,6 +563,16 @@ export default function DashboardPage() {
                   ? new Date(lastSynced).toLocaleTimeString(locale === "vi" ? "vi-VN" : "en-US")
                   : t("common.sync")}
             </button>
+
+            <button
+              onClick={handleRecalculate}
+              disabled={recalculating}
+              title="Recalculate costs from current pricing tables"
+              className="flex items-center gap-1.5 px-3 h-8 rounded-full bg-muted hover:bg-muted/70 text-[12px] font-medium text-[#3c3c43] dark:text-[#c7c7cc] transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+            >
+              <Calculator className={`w-3.5 h-3.5 ${recalculating ? "animate-pulse" : ""}`} />
+              {recalcMsg ?? (recalculating ? "Recalculating…" : "Recalc $")}
+            </button>
           </div>
         </div>
       </header>
@@ -543,7 +582,7 @@ export default function DashboardPage() {
 
         {/* Source filter */}
         <div className="flex items-center gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
-          {(["all", "claude_code", "cline", "codex", "gemini", "github_copilot", "cursor"] as Source[]).map(s => {
+          {(["all", "claude_code", "cline", "codex", "gemini", "antigravity_cli", "github_copilot", "cursor"] as Source[]).map(s => {
             const label = s === "all" ? t("common.all") : SOURCE_LABELS[s];
             const isSelected = source === s;
             const brandColor = SOURCE_COLORS[s] ?? "#8e8e93";
@@ -749,7 +788,7 @@ export default function DashboardPage() {
                           {formatK(s.totalInput + s.totalOutput)}
                         </td>
                         <td className="font-numeric px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-semibold">
-                          ${s.totalCost.toFixed(4)}
+                          ${(s.totalCost || 0).toFixed(4)}
                         </td>
                       </tr>
                     ))}
@@ -811,7 +850,7 @@ export default function DashboardPage() {
                           {formatK(c.output)}
                         </td>
                         <td className="font-numeric px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-semibold">
-                          ${c.cost.toFixed(5)}
+                          ${(c.cost || 0).toFixed(5)}
                         </td>
                       </tr>
                     ))}
@@ -876,7 +915,7 @@ export default function DashboardPage() {
                           {formatK(p.totalInput + p.totalOutput)}
                         </td>
                         <td className="font-numeric px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-semibold">
-                          ${p.totalCost.toFixed(4)}
+                          ${(p.totalCost || 0).toFixed(4)}
                         </td>
                       </tr>
                     ))}

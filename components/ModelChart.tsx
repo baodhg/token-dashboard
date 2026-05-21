@@ -33,7 +33,8 @@ const PLATFORMS = [
   { id: "claude_code", label: "Claude Code", icon: "/claude.png", color: "212, 132, 90" },  // Terracotta/coral
   { id: "cline",       label: "Cline",       icon: "/cline.png",  color: "90, 99, 112" },   // Dark slate
   { id: "codex",       label: "Codex",       icon: "/codex.png",  color: "123, 108, 246" },  // Purple-blue
-  { id: "gemini",      label: "Gemini CLI",  icon: "/geminicli.png", color: "66, 133, 244" }, // Blue
+  { id: "gemini",      label: "Gemini CLI",  icon: "/geminicli.png", color: "99, 102, 241" }, // Indigo
+  { id: "antigravity_cli", label: "Antigravity CLI", icon: "/antigravity.png", color: "66, 133, 244" }, // Google Blue
   { id: "github_copilot", label: "GitHub Copilot", icon: "/github.png", color: "36, 41, 46" }, // Dark gray/black
   { id: "cursor",         label: "Cursor",         icon: "/cursor.png",         color: "95, 201, 248" }, // Light blue
 ];
@@ -78,33 +79,36 @@ const prevValuesMap = new Map<string, number>();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const AnimatedLabel = (props: any) => {
   const { x, y, width, height, value, overallTotal, entryKey } = props;
-  
-  // Use the module-level map to get the last known value for this specific model, or 0 if new.
+
+  // Persist last known non-zero width so label stays at correct x position
+  // even if Recharts ever passes width=0 during a re-render cycle.
+  const stableWidth = React.useRef<number>(width || 0);
+  if (width > 0) stableWidth.current = width;
+
   const [displayValue, setDisplayValue] = React.useState(() => prevValuesMap.get(entryKey) || 0);
   const currentDisplayRef = React.useRef(displayValue);
-  
+
   React.useEffect(() => {
-    let startTimestamp: number | null = null;
-    const duration = 1200; // Match Bar animation duration
     const startValue = currentDisplayRef.current;
     const endValue = value;
-
     if (startValue === endValue) {
       setDisplayValue(endValue);
       return;
     }
 
+    let startTimestamp: number | null = null;
+    const duration = 900;
+
     const step = (timestamp: number) => {
       if (!startTimestamp) startTimestamp = timestamp;
       const progress = Math.min((timestamp - startTimestamp) / duration, 1);
-      // Ease out cubic
       const easedProgress = 1 - Math.pow(1 - progress, 3);
       const current = Math.floor(easedProgress * (endValue - startValue) + startValue);
-      
+
       setDisplayValue(current);
       currentDisplayRef.current = current;
       prevValuesMap.set(entryKey, current);
-      
+
       if (progress < 1) {
         window.requestAnimationFrame(step);
       } else {
@@ -113,9 +117,8 @@ const AnimatedLabel = (props: any) => {
         prevValuesMap.set(entryKey, endValue);
       }
     };
-    
+
     const req = window.requestAnimationFrame(step);
-    
     return () => window.cancelAnimationFrame(req);
   }, [value, entryKey]);
 
@@ -123,7 +126,7 @@ const AnimatedLabel = (props: any) => {
 
   return (
     <text
-      x={x + width + 10}
+      x={x + stableWidth.current + 10}
       y={y + height / 2}
       fill="var(--chart-tick-strong)"
       fontSize={10}
@@ -211,15 +214,13 @@ export default function ModelChart({ data }: Props) {
                   tick={{ fontSize: 11, fill: "var(--chart-tick-strong)", fontFamily: "inherit", fontWeight: 500 }}
                   axisLine={false}
                   tickLine={false}
-                  width={100}
+                  width={120}
                 />
                 <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--chart-grid)", opacity: 0.4 }} />
-                <Bar 
-                  dataKey="totalTokens" 
+                <Bar
+                  dataKey="totalTokens"
                   radius={[0, 4, 4, 0]}
-                  isAnimationActive={true}
-                  animationDuration={1500}
-                  animationEasing="ease-out"
+                  isAnimationActive={false}
                 >
                   {group.models.map((entry) => (
                     <Cell key={entry.model} fill={entry.fillColor} />
