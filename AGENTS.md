@@ -385,14 +385,32 @@ If Antigravity adds a JSONL export in the future, add a new adapter reading from
 ### Cursor
 
 - File: `lib/sync/cursor.ts`
-- Input:
-  - `.../User/globalStorage/state.vscdb`
-  - `.../User/workspaceStorage/*/state.vscdb`
-- Strategy:
-  - Copy SQLite DB to temp first to avoid lock issues
-  - Parse multiple possible storage layouts
-  - Insert normalized rows with `createMany`
-  - Cost is stored as `0`
+- Status: **⚠️ DISABLED** — storage format changed, token data not accessible
+- Previous input (no longer available):
+  - `.../User/globalStorage/state.vscdb` — SQLite keys like `bubbleId:*`, `composer.composerData*`, `aichat.chatdata*` no longer exist
+  - `.../User/workspaceStorage/*/state.vscdb` — same issue
+- Current data locations:
+  - `~/.cursor/projects/*/agent-transcripts/*/` — JSONL files with conversation history (no token counts)
+  - `AppData/Roaming/Cursor/User/globalStorage/state.vscdb` — migrated to antigravity format, `chat.ChatSessionStore.index` is empty
+
+#### Cursor storage migration issue (2025-2026)
+
+Cursor underwent a breaking change:
+- Old keys (`bubbleId:*`, `composer.composerData*`) no longer used
+- Migrated to antigravity-based storage
+- Chat session store (`chat.ChatSessionStore.index`) is empty in current data
+- Agent transcripts (JSONL) contain conversation history but **no token/usage data**
+
+**Why sync is disabled:**
+1. No readable token counts available in any storage location
+2. JSONL has conversation history but not API usage metrics
+3. Unable to calculate cost (always 0, but also can't track usage)
+4. Awaiting Cursor to expose usage data via API or new storage format
+
+**How to re-enable:**
+- Contact Cursor team to expose token usage metrics
+- Or wait for storage format documentation/export feature
+- When available, implement JSONL parser with token extraction
 
 ## Pricing System
 
@@ -492,3 +510,4 @@ When working on this repo, start from these files:
 - **`syncGemini()` auto-corrects legacy misattributed records.** On each sync, it runs `updateMany` to flip any `source="antigravity_cli"` records with Gemini model IDs back to `source="gemini"`. This is a permanent idempotent cleanup for the old marker-based bug.
 - **Model label truncation in ModelChart.** YAxis `width={120}` supports labels up to ~14 chars at 11px. If you add models with longer display names (>14 chars), either increase `width` in `ModelChart.tsx` or shorten the label in `MODEL_LABEL` in `token-stats/route.ts`. Both Gemini and Claude model IDs have versioned suffixes (e.g. `claude-opus-4-7-20250219`) — the prefix-matching fallback in `modelLabel()` handles these automatically.
 - **After any pricing change, click "Recalc $".** Both `lib/sync/*.ts` (used at sync time) and `lib/recalculate.ts` (used by "Recalc $") must be updated together. The DB stores the cost at write time and does not recompute automatically.
+- **Cursor sync is currently disabled.** As of 2026-05-22, Cursor changed its storage format (migrated to antigravity backend) and no longer exposes token usage in accessible format. SQLite keys like `bubbleId:*` and `composer.composerData*` no longer exist, and agent transcript JSONL files contain only conversation history with no token counts. Re-enable when/if Cursor provides usage metrics API or documents the new storage format.

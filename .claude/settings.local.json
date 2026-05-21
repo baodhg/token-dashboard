@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx tsx *)"
+      "Bash(npx tsx *)",
+      "Bash(xargs -I {} bash -c 'echo \"=== {} ===\"; head -3 \"{}\"')",
+      "Bash(sqlite3 \"/c/Users/Admin/AppData/Roaming/Cursor/User/globalStorage/state.vscdb\" \".tables\")",
+      "Bash(sqlite3 \"/c/Users/Admin/AppData/Roaming/Cursor/User/globalStorage/state.vscdb\" \"SELECT COUNT\\(*\\) as total_rows FROM ItemTable;\")",
+      "Bash(sqlite3 \"/c/Users/Admin/AppData/Roaming/Cursor/User/globalStorage/state.vscdb\" \"SELECT COUNT\\(*\\) as total_rows FROM cursorDiskKV;\")",
+      "Bash(tasklist)",
+      "Bash(git add:*)",
+      "Bash(git commit -m 'fix: Disable Cursor sync - storage format changed, token data inaccessible:*)"
     ]
   }
 }
