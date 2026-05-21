@@ -8,7 +8,14 @@
       "Bash(sqlite3 \"/c/Users/Admin/AppData/Roaming/Cursor/User/globalStorage/state.vscdb\" \"SELECT COUNT\\(*\\) as total_rows FROM cursorDiskKV;\")",
       "Bash(tasklist)",
       "Bash(git add:*)",
-      "Bash(git commit -m 'fix: Disable Cursor sync - storage format changed, token data inaccessible:*)"
+      "Bash(git commit -m 'fix: Disable Cursor sync - storage format changed, token data inaccessible:*)",
+      "Bash(git push:*)",
+      "Bash(gh run:*)",
+      "Bash(npm install:*)",
+      "Bash(git commit -m 'chore: Update package-lock.json to match package.json:*)",
+      "Bash(git commit -m 'chore: Regenerate package-lock.json with legacy-peer-deps:*)",
+      "Bash(git reset:*)",
+      "Bash(git commit -m 'chore: Regenerate package-lock.json with clean install:*)"
     ]
   }
 }
