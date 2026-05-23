@@ -106,9 +106,9 @@ function buildChartData(
   } else {
     const configs: Record<Exclude<Period, "custom">, Cfg> = {
       "1d": {
-        count: 1440,
-        labelFn: (i) => `${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}`,
-        bucketFn: (ts) => ts.getHours() * 60 + ts.getMinutes(),
+        count: 144,
+        labelFn: (i) => `${String(Math.floor(i / 6)).padStart(2, "0")}:${String((i % 6) * 10).padStart(2, "0")}`,
+        bucketFn: (ts) => ts.getHours() * 6 + Math.floor(ts.getMinutes() / 10),
       },
       "3d": {
         count: 12,

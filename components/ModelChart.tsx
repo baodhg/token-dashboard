@@ -31,20 +31,17 @@ function formatK(n: number) {
 }
 
 const PLATFORMS = [
-  { id: "claude_code", label: "Claude Code", icon: "/claude.png", color: "212, 132, 90" },  // Terracotta/coral
-  { id: "cline",       label: "Cline",       icon: "/cline.png",  color: "90, 99, 112" },   // Dark slate
-  { id: "codex",       label: "Codex",       icon: "/codex.png",  color: "123, 108, 246" },  // Purple-blue
-  { id: "gemini",      label: "Gemini CLI",  icon: "/geminicli.png", color: "99, 102, 241" }, // Indigo
-  { id: "antigravity_cli", label: "Antigravity CLI", icon: "/antigravity.png", color: "66, 133, 244" }, // Google Blue
-  { id: "github_copilot", label: "GitHub Copilot", icon: "/github.png", color: "36, 41, 46" }, // Dark gray/black
-  { id: "cursor",         label: "Cursor",         icon: "/cursor.png",         color: "95, 201, 248" }, // Light blue
+  { id: "claude_code", label: "Claude Code", icon: "/claude.png", color: "212, 132, 90", from: "#ff8c42", to: "#fca5a5" },
+  { id: "cline",       label: "Cline",       icon: "/cline.png",  color: "90, 99, 112", from: "#10b981", to: "#6ee7b7" },
+  { id: "codex",       label: "Codex",       icon: "/codex.png",  color: "123, 108, 246", from: "#8b5cf6", to: "#c4b5fd" },
+  { id: "gemini",      label: "Gemini CLI",  icon: "/geminicli.png", color: "99, 102, 241", from: "#6366f1", to: "#a5b4fc" },
+  { id: "antigravity_cli", label: "Antigravity CLI", icon: "/antigravity.png", color: "66, 133, 244", from: "#4285f4", to: "#93c5fd" },
+  { id: "github_copilot", label: "GitHub Copilot", icon: "/github.png", color: "36, 41, 46", from: "#06b6d4", to: "#67e8f9" },
+  { id: "cursor",         label: "Cursor",         icon: "/cursor.png",         color: "95, 201, 248", from: "#71717a", to: "#d4d4d8" },
 ];
 
-function calculateBarColor(rgb: string, pct: number, isMax: boolean) {
-  if (isMax) return `rgb(${rgb})`;
-  // Scale opacity based on pct relative to max in its group, min 0.4
-  const opacity = 0.4 + (pct / 100) * 0.5;
-  return `rgba(${rgb}, ${opacity.toFixed(2)})`;
+function calculateBarColor(platformId: string, pct: number, isMax: boolean) {
+  return `url(#gradient-${platformId})`;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -200,7 +197,7 @@ export default function ModelChart({ data, animationKey = 0 }: Props) {
       ...p,
       models: models.map(m => ({
         ...m,
-        fillColor: calculateBarColor(p.color, (m.totalTokens / overallMaxTokens) * 100, m.totalTokens === overallMaxTokens)
+        fillColor: calculateBarColor(p.id, (m.totalTokens / overallMaxTokens) * 100, m.totalTokens === overallMaxTokens)
       })),
       platformTotal
     };
@@ -236,6 +233,12 @@ export default function ModelChart({ data, animationKey = 0 }: Props) {
                 margin={{ top: 0, right: 90, left: 4, bottom: 0 }}
                 barSize={16}
               >
+                <defs>
+                  <linearGradient id={`gradient-${group.id}`} x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor={group.from} />
+                    <stop offset="100%" stopColor={group.to} />
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" horizontal={false} />
                 <XAxis
                   type="number"
@@ -255,7 +258,7 @@ export default function ModelChart({ data, animationKey = 0 }: Props) {
                   dataKey="totalTokens"
                   radius={[0, 4, 4, 0]}
                   isAnimationActive={shouldAnimate}
-                  animationDuration={600}
+                  animationDuration={1000}
                   animationEasing="ease-out"
                   animationBegin={index * 70}
                   shape={(sp: any) => {
@@ -263,11 +266,16 @@ export default function ModelChart({ data, animationKey = 0 }: Props) {
                     const isUp = entry ? justIncreased.has(entry.model) : false;
                     const w = Math.max(sp.width || 0, 0);
                     if (w === 0) return <g />;
+                    
+                    const pct = overallMaxTokens > 0 ? entry.totalTokens / overallMaxTokens : 0;
+                    const opacity = isUp ? 1 : 0.5 + (pct * 0.5);
+
                     return (
                       <g>
                         <rect
                           x={sp.x} y={sp.y} width={w} height={sp.height}
                           fill={sp.fill}
+                          fillOpacity={opacity}
                           stroke={isUp ? `rgba(${group.color}, 0.7)` : "none"}
                           strokeWidth={isUp ? 1.5 : 0}
                           rx={4} ry={4}
@@ -276,8 +284,8 @@ export default function ModelChart({ data, animationKey = 0 }: Props) {
                           <rect
                             x={sp.x} y={sp.y} width={w} height={sp.height}
                             rx={4} ry={4}
-                            fill="rgba(255,255,255,0.28)"
-                            style={{ animation: "bar-energy-rise 1s ease-out forwards" }}
+                            fill="rgba(255,255,255,0.45)"
+                            style={{ animation: "bar-energy-rise 0.85s cubic-bezier(0.4, 0, 0.2, 1) forwards" }}
                           />
                         )}
                       </g>

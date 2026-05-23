@@ -171,10 +171,10 @@ export async function syncGemini(): Promise<SyncResult> {
   // Safe condition: inputTokens > cacheTokens means the old format (fresh = input - cached > 0)
   await prisma.$executeRaw`
     UPDATE calls
-    SET input_tokens = input_tokens - cache_tokens
+    SET "inputTokens" = "inputTokens" - "cacheTokens"
     WHERE source = 'gemini'
-      AND cache_tokens > 0
-      AND input_tokens > cache_tokens
+      AND "cacheTokens" > 0
+      AND "inputTokens" > "cacheTokens"
   `;
 
   let projects: string[];
