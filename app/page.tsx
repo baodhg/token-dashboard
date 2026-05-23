@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import {
   Zap, ArrowDownLeft, ArrowUpRight, DollarSign,
@@ -11,13 +11,13 @@ import { PERIODS, type Period, type DataPoint } from "@/lib/mock-data";
 import type { ModelStat } from "@/components/ModelChart";
 import { useI18n } from "@/lib/i18n-context";
 
-const TokenChart = dynamic<{ data: DataPoint[]; period: Period }>(
+const TokenChart = dynamic<{ data: DataPoint[]; period: Period; animationKey?: number }>(
   () => import("@/components/TokenChart"), { ssr: false }
 );
-const CacheChart = dynamic<{ data: DataPoint[]; period: Period }>(
+const CacheChart = dynamic<{ data: DataPoint[]; period: Period; animationKey?: number }>(
   () => import("@/components/CacheChart"), { ssr: false }
 );
-const ModelChart = dynamic<{ data: ModelStat[] }>(
+const ModelChart = dynamic<{ data: ModelStat[]; animationKey?: number }>(
   () => import("@/components/ModelChart"), { ssr: false }
 );
 
@@ -119,20 +119,47 @@ const SOURCE_ICONS: Record<string, string> = {
 /* ─── stat card ────────────────────────────────────────── */
 
 function StatCard({
-  label, value, sub, icon: Icon, iconBg, iconColor, loading,
+  label, rawValue, formatter, sub, icon: Icon, iconBg, iconColor, loading, isPollGlow, filterKey,
 }: {
-  label: string; value: string; sub: string;
-  icon: React.ElementType; iconBg: string; iconColor: string; loading: boolean;
+  label: string; rawValue: number; formatter: (n: number) => string; sub: string;
+  icon: React.ElementType; iconBg: string; iconColor: string;
+  loading: boolean; isPollGlow: boolean; filterKey: number;
 }) {
+  const [displayValue, setDisplayValue] = useState(0);
+  const displayRef = useRef(0);
+  const prevFilterKeyRef = useRef(filterKey);
+  const rafRef = useRef<number>(0);
+
+  useEffect(() => {
+    cancelAnimationFrame(rafRef.current);
+    const filterKeyChanged = filterKey !== prevFilterKeyRef.current;
+    prevFilterKeyRef.current = filterKey;
+    const startValue = filterKeyChanged ? 0 : displayRef.current;
+    const endValue = rawValue;
+    if (startValue === endValue) return;
+    let startTime: number | null = null;
+    const step = (ts: number) => {
+      if (!startTime) startTime = ts;
+      const p = Math.min((ts - startTime) / 800, 1);
+      const v = startValue + (endValue - startValue) * (1 - Math.pow(1 - p, 3));
+      displayRef.current = v;
+      setDisplayValue(v);
+      if (p < 1) { rafRef.current = requestAnimationFrame(step); }
+      else { displayRef.current = endValue; setDisplayValue(endValue); }
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [rawValue, filterKey]);
+
   return (
-    <div className="bg-card rounded-2xl p-5 border border-border shadow-sm flex flex-col gap-3">
-      <div className={`w-9 h-9 rounded-xl ${iconBg} flex items-center justify-center`}>
+    <div className={`bg-card rounded-2xl p-5 border shadow-sm flex flex-col gap-3 transition-all duration-500 ${isPollGlow ? "border-emerald-400/30 shadow-emerald-500/8 shadow-md" : "border-border"}`}>
+      <div className={`w-9 h-9 rounded-xl ${iconBg} flex items-center justify-center transition-transform duration-300 ${isPollGlow ? "scale-110" : "scale-100"}`}>
         <Icon className={`w-4 h-4 ${iconColor}`} />
       </div>
       <div>
         <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">{label}</p>
         <p className={`font-numeric text-[26px] font-bold text-foreground leading-none tracking-tight ${loading ? "opacity-30" : ""}`}>
-          {loading ? "···" : value}
+          {loading ? "···" : formatter(displayValue)}
         </p>
         <p className="text-[11px] text-muted-foreground/60 mt-1.5">{sub}</p>
       </div>
@@ -282,6 +309,9 @@ export default function DashboardPage() {
     from: new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0],
     to: new Date().toISOString().split('T')[0]
   }));
+  const [filterKey, setFilterKey]     = useState(0);
+  const [isPollGlow, setIsPollGlow]   = useState(false);
+  const glowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const t = localStorage.getItem("theme") as "light" | "dark" | "system" | null;
@@ -340,7 +370,7 @@ export default function DashboardPage() {
       try {
         const r = await fetch(`/api/token-stats?${qs}`);
         const result = await r.json();
-        if (active) setData(result);
+        if (active) { setData(result); setFilterKey(k => k + 1); }
       } catch {
         if (active) setData(null);
       } finally {
@@ -372,7 +402,12 @@ export default function DashboardPage() {
         // Refresh stats to show updated costs
         const qs = new URLSearchParams({ period, ...(source !== "all" ? { source } : {}) });
         if (period === "custom") { qs.append("from", customRange.from); qs.append("to", customRange.to); }
-        fetch(`/api/token-stats?${qs}`).then(r => r.json()).then(setData).catch(() => {});
+        fetch(`/api/token-stats?${qs}`).then(r => r.json()).then(result => {
+          setData(result);
+          if (glowTimerRef.current) clearTimeout(glowTimerRef.current);
+          setIsPollGlow(true);
+          glowTimerRef.current = setTimeout(() => setIsPollGlow(false), 1200);
+        }).catch(() => {});
         setTimeout(() => setRecalcMsg(null), 4000);
       })
       .catch(e => setRecalcMsg(`Error: ${e}`))
@@ -395,7 +430,12 @@ export default function DashboardPage() {
             }
             fetch(`/api/token-stats?${qs}`)
               .then(r => r.json())
-              .then(setData)
+              .then(result => {
+                setData(result);
+                if (glowTimerRef.current) clearTimeout(glowTimerRef.current);
+                setIsPollGlow(true);
+                glowTimerRef.current = setTimeout(() => setIsPollGlow(false), 1200);
+              })
               .catch(() => {});
           }
         })
@@ -454,7 +494,8 @@ export default function DashboardPage() {
   const statCards = [
     {
       label: t("common.total_tokens"),
-      value: formatK(summary.total),
+      rawValue: summary.total,
+      formatter: formatK,
       sub:   `${summary.callCount.toLocaleString()} ${t("common.calls")}`,
       icon: Zap,
       iconBg: "bg-indigo-50 dark:bg-indigo-500/15",
@@ -462,8 +503,9 @@ export default function DashboardPage() {
     },
     {
       label: t("common.input_tokens"),
-      value: formatK(summary.totalInput),
-      sub:   summary.totalCache > 0 
+      rawValue: summary.totalInput,
+      formatter: formatK,
+      sub:   summary.totalCache > 0
         ? `${formatK(summary.totalCache)} ${t("common.cached")} (${((summary.totalCache / summary.totalInput) * 100).toFixed(0)}%)`
         : `${pct(summary.totalInput)} ${t("common.total")}`,
       icon: ArrowDownLeft,
@@ -472,7 +514,8 @@ export default function DashboardPage() {
     },
     {
       label: t("common.output_tokens"),
-      value: formatK(summary.totalOutput),
+      rawValue: summary.totalOutput,
+      formatter: formatK,
       sub:   `${pct(summary.totalOutput)} ${t("common.total")}`,
       icon: ArrowUpRight,
       iconBg: "bg-violet-50 dark:bg-violet-500/15",
@@ -480,7 +523,8 @@ export default function DashboardPage() {
     },
     {
       label: t("common.estimated_cost"),
-      value: `$${(summary.totalCost || 0).toFixed(4)}`,
+      rawValue: summary.totalCost || 0,
+      formatter: (n: number) => `$${n.toFixed(4)}`,
       sub:   t("common.reference_price"),
       icon: DollarSign,
       iconBg: "bg-emerald-50 dark:bg-emerald-500/15",
@@ -550,6 +594,12 @@ export default function DashboardPage() {
             >
               {theme === "light" ? <Sun className="w-3.5 h-3.5" /> : theme === "dark" ? <Moon className="w-3.5 h-3.5" /> : <Laptop className="w-3.5 h-3.5" />}
             </button>
+
+            {/* Live polling indicator */}
+            <span className="relative flex h-2 w-2 shrink-0" title="Live polling active">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
 
             <button
               onClick={handleSync}
@@ -634,13 +684,18 @@ export default function DashboardPage() {
         {/* Row 1: Stat cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {statCards.map(s => (
-            <StatCard key={s.label} {...s} loading={loading} />
+            <StatCard key={s.label} {...s} loading={loading} isPollGlow={isPollGlow} filterKey={filterKey} />
           ))}
         </div>
 
         {/* Row 2: Cache read bar chart + Tokens theo model */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <div className="lg:col-span-1 bg-card rounded-2xl p-5 border border-border shadow-sm">
+          <div className={`relative lg:col-span-1 bg-card rounded-2xl p-5 border shadow-sm overflow-hidden transition-all duration-700 ${isPollGlow ? "border-cyan-400/25 shadow-cyan-500/5 shadow-md" : "border-border"}`}>
+            {isPollGlow && (
+              <div className="absolute inset-0 pointer-events-none z-10" aria-hidden="true">
+                <div className="absolute top-0 bottom-0 w-24 bg-linear-to-r from-transparent via-white/6 to-transparent dark:via-white/4 animate-sweep" />
+              </div>
+            )}
             <SectionHeader title={t("common.cache_read")} />
             <div className="h-64">
               {loading ? (
@@ -648,32 +703,42 @@ export default function DashboardPage() {
               ) : chartEmpty ? (
                 <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">{t("common.no_data")}</div>
               ) : (
-                <CacheChart data={chartData} period={period} />
+                <CacheChart data={chartData} period={period} animationKey={filterKey} />
               )}
             </div>
           </div>
 
-          <div className="lg:col-span-2 bg-card rounded-2xl p-5 border border-border shadow-sm">
+          <div className={`relative lg:col-span-2 bg-card rounded-2xl p-5 border shadow-sm overflow-hidden transition-all duration-700 ${isPollGlow ? "border-purple-400/25 shadow-purple-500/5 shadow-md" : "border-border"}`}>
+            {isPollGlow && (
+              <div className="absolute inset-0 pointer-events-none z-10" aria-hidden="true">
+                <div className="absolute top-0 bottom-0 w-24 bg-linear-to-r from-transparent via-white/6 to-transparent dark:via-white/4 animate-sweep" />
+              </div>
+            )}
             <SectionHeader title={t("common.tokens_by_model")} />
             <div className="h-64 overflow-y-auto pr-2 custom-scrollbar">
               {loading ? (
                 <div className="h-full flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">{t("common.loading")}</div>
               ) : (
-                <ModelChart data={modelStats} />
+                <ModelChart data={modelStats} animationKey={filterKey} />
               )}
             </div>
           </div>
         </div>
 
         {/* Row 3: Input / Output line chart */}
-        <div className="bg-card rounded-2xl p-5 border border-border shadow-sm">
+        <div className={`relative bg-card rounded-2xl p-5 border shadow-sm overflow-hidden transition-all duration-700 ${isPollGlow ? "border-indigo-400/25 shadow-indigo-500/5 shadow-md" : "border-border"}`}>
+          {isPollGlow && (
+            <div className="absolute inset-0 pointer-events-none z-10" aria-hidden="true">
+              <div className="absolute top-0 bottom-0 w-24 bg-linear-to-r from-transparent via-white/6 to-transparent dark:via-white/4 animate-sweep" />
+            </div>
+          )}
           <SectionHeader title={t("common.input_output")} />
           {loading ? (
             <div className="h-64 flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">{t("common.loading")}</div>
           ) : chartEmpty ? (
             <div className="h-64 flex items-center justify-center text-[#aeaeb2] dark:text-[#6e6e72] text-sm">{t("common.no_data")}</div>
           ) : (
-            <TokenChart data={chartData} period={period} />
+            <TokenChart data={chartData} period={period} animationKey={filterKey} />
           )}
         </div>
 

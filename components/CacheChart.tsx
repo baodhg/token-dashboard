@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
@@ -10,6 +11,7 @@ import { useI18n } from "@/lib/i18n-context";
 interface Props {
   data: DataPoint[];
   period: Period;
+  animationKey?: number;
 }
 
 function formatK(n: number) {
@@ -54,13 +56,78 @@ function getInterval(p: Period, len: number) {
   return X_INTERVAL[p] ?? 0;
 }
 
-export default function CacheChart({ data, period }: Props) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function PeakPulseDot(peakIndex: number, peakValue: number, totalPoints: number): (props: any) => React.ReactElement | null {
+  const label = formatK(peakValue);
+  const boxW = Math.max(label.length * 7 + 14, 42);
+  const boxH = 20;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return function DotRenderer(props: any) {
+    const { cx, cy, index } = props;
+    if (index !== peakIndex || cx == null || cy == null) return null;
+
+    // Flip callout to left if peak is in the right 30% of chart
+    const flipLeft = peakIndex > totalPoints * 0.7;
+    const offsetX = flipLeft ? -(boxW + 22) : 22;
+    const bx = cx + offsetX;
+    const by = cy - 34;
+    const lineEndX = flipLeft ? bx + boxW : bx;
+
+    return (
+      <g key={`peak-${index}`}>
+        {/* Pulse rings */}
+        <circle cx={cx} cy={cy} r={6} fill="none" stroke="#06b6d4" strokeWidth={1.5}>
+          <animate attributeName="r" values="6;20" dur="1.6s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.8;0" dur="1.6s" repeatCount="indefinite" />
+        </circle>
+        <circle cx={cx} cy={cy} r={6} fill="none" stroke="#06b6d4" strokeWidth={1}>
+          <animate attributeName="r" values="6;20" dur="1.6s" begin="0.55s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.5;0" dur="1.6s" begin="0.55s" repeatCount="indefinite" />
+        </circle>
+        {/* Center dot */}
+        <circle cx={cx} cy={cy} r={4} fill="#06b6d4" stroke="white" strokeWidth={1.5} />
+        <circle cx={cx} cy={cy} r={2} fill="white">
+          <animate attributeName="opacity" values="1;0.3;1" dur="1.6s" repeatCount="indefinite" />
+        </circle>
+        {/* Callout line */}
+        <line
+          x1={cx} y1={cy - 5}
+          x2={lineEndX} y2={by + boxH / 2}
+          stroke="#06b6d4" strokeWidth={1} strokeDasharray="3 2" opacity={0.7}
+        />
+        {/* Callout box */}
+        <rect
+          x={bx} y={by}
+          width={boxW} height={boxH}
+          rx={4} ry={4}
+          fill="#0e7490" stroke="#06b6d4" strokeWidth={1} opacity={0.92}
+        />
+        <text
+          x={bx + boxW / 2} y={by + boxH / 2 + 1}
+          textAnchor="middle" dominantBaseline="middle"
+          fill="white" fontSize={11} fontWeight={700} fontFamily="inherit"
+        >
+          {label}
+        </text>
+      </g>
+    );
+  };
+}
+
+export default function CacheChart({ data, period, animationKey = 0 }: Props) {
   const { t } = useI18n();
   const needsAngle = period === "1m" || (period === "1d" && data.length < 1000) || period === "all" || (period === "custom" && data.length > 7);
+
+  const peakIndex = data.reduce(
+    (maxIdx, point, idx) => (point.cache ?? 0) > (data[maxIdx]?.cache ?? 0) ? idx : maxIdx,
+    0
+  );
 
   return (
     <ResponsiveContainer width="100%" height={256}>
       <AreaChart
+        key={animationKey}
         data={data}
         margin={{ top: 20, right: 8, left: 4, bottom: needsAngle ? 16 : 0 }}
       >
@@ -101,8 +168,11 @@ export default function CacheChart({ data, period }: Props) {
           strokeWidth={2}
           fillOpacity={1}
           fill="url(#colorCache)"
-          dot={false}
+          dot={PeakPulseDot(peakIndex, data[peakIndex]?.cache ?? 0, data.length)}
           activeDot={{ r: 5, strokeWidth: 0, fill: "#06b6d4" }}
+          isAnimationActive
+          animationDuration={700}
+          animationEasing="ease-out"
         />
       </AreaChart>
     </ResponsiveContainer>

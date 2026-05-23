@@ -20,6 +20,7 @@ export interface ModelStat {
 
 interface Props {
   data: ModelStat[];
+  animationKey?: number;
 }
 
 function formatK(n: number) {
@@ -78,7 +79,7 @@ const prevValuesMap = new Map<string, number>();
 // Custom animated label for the "race" effect
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const AnimatedLabel = (props: any) => {
-  const { x, y, width, height, value, overallTotal, entryKey } = props;
+  const { x, y, width, height, value, overallTotal, entryKey, isIncreased } = props;
 
   // Persist last known non-zero width so label stays at correct x position
   // even if Recharts ever passes width=0 during a re-render cycle.
@@ -136,13 +137,46 @@ const AnimatedLabel = (props: any) => {
       dominantBaseline="central"
       className="font-numeric"
     >
-      {formatK(displayValue)} ({pct}%)
+      <tspan>{formatK(displayValue)} ({pct}%)</tspan>
+      {isIncreased && (
+        <tspan fill="#4ade80" dx={5} fontSize={9} fontWeight={900}>▲</tspan>
+      )}
     </text>
   );
 };
 
-export default function ModelChart({ data }: Props) {
+export default function ModelChart({ data, animationKey = 0 }: Props) {
   const { t } = useI18n();
+  const [shouldAnimate, setShouldAnimate]     = React.useState(true);
+  const [justIncreased, setJustIncreased]     = React.useState<Set<string>>(new Set());
+  const prevValuesRef   = React.useRef<Map<string, number>>(new Map());
+  const increaseTimer   = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Filter change: reset everything, re-enable bar animation for initial draw
+  React.useEffect(() => {
+    prevValuesMap.clear();
+    prevValuesRef.current.clear();
+    setJustIncreased(new Set());
+    setShouldAnimate(true);
+    const t = setTimeout(() => setShouldAnimate(false), 1500);
+    return () => clearTimeout(t);
+  }, [animationKey]);
+
+  // Data change (poll): detect which models grew and highlight them
+  React.useEffect(() => {
+    if (!data.length) return;
+    const grew = new Set<string>();
+    data.forEach(d => {
+      const prev = prevValuesRef.current.get(d.model);
+      if (prev !== undefined && d.totalTokens > prev) grew.add(d.model);
+      prevValuesRef.current.set(d.model, d.totalTokens);
+    });
+    if (grew.size > 0) {
+      setJustIncreased(grew);
+      if (increaseTimer.current) clearTimeout(increaseTimer.current);
+      increaseTimer.current = setTimeout(() => setJustIncreased(new Set()), 1400);
+    }
+  }, [data]);
 
   if (!data.length) {
     return (
@@ -175,9 +209,9 @@ export default function ModelChart({ data }: Props) {
     .sort((a, b) => b.platformTotal - a.platformTotal);
 
   return (
-    <div className="space-y-8">
-      {groups.map(group => (
-        <div key={group.id} className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-700">
+    <div key={animationKey} className="space-y-8">
+      {groups.map((group, index) => (
+        <div key={group.id} className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-700" style={{ animationDelay: `${index * 70}ms` }}>
           {/* Platform Header with Total */}
           <div className="flex items-center justify-between border-b border-border/50 pb-2">
             <div className="flex items-center gap-2">
@@ -220,21 +254,56 @@ export default function ModelChart({ data }: Props) {
                 <Bar
                   dataKey="totalTokens"
                   radius={[0, 4, 4, 0]}
-                  isAnimationActive={false}
+                  isAnimationActive={shouldAnimate}
+                  animationDuration={600}
+                  animationEasing="ease-out"
+                  animationBegin={index * 70}
+                  shape={(sp: any) => {
+                    const entry = group.models[sp.index];
+                    const isUp = entry ? justIncreased.has(entry.model) : false;
+                    const w = Math.max(sp.width || 0, 0);
+                    if (w === 0) return <g />;
+                    return (
+                      <g>
+                        <rect
+                          x={sp.x} y={sp.y} width={w} height={sp.height}
+                          fill={sp.fill}
+                          stroke={isUp ? `rgba(${group.color}, 0.7)` : "none"}
+                          strokeWidth={isUp ? 1.5 : 0}
+                          rx={4} ry={4}
+                        />
+                        {isUp && (
+                          <rect
+                            x={sp.x} y={sp.y} width={w} height={sp.height}
+                            rx={4} ry={4}
+                            fill="rgba(255,255,255,0.28)"
+                            style={{ animation: "bar-energy-rise 1s ease-out forwards" }}
+                          />
+                        )}
+                      </g>
+                    );
+                  }}
                 >
-                  {group.models.map((entry) => (
-                    <Cell key={entry.model} fill={entry.fillColor} />
-                  ))}
+                  {group.models.map((entry) => {
+                    const isUp = justIncreased.has(entry.model);
+                    return (
+                      <Cell
+                        key={entry.model}
+                        fill={isUp ? `rgba(${group.color}, 1)` : entry.fillColor}
+                      />
+                    );
+                  })}
                   <LabelList
                     dataKey="totalTokens"
                     content={(props: any) => {
                       const entry = group.models[props.index];
                       return (
-                        <AnimatedLabel 
-                          key={`label-${entry?.model || props.index}`} 
-                          {...props} 
+                        <AnimatedLabel
+                          key={`label-${entry?.model || props.index}`}
+                          {...props}
                           overallTotal={overallTotal}
                           entryKey={entry?.model || props.index}
+                          isIncreased={justIncreased.has(entry?.model)}
                         />
                       );
                     }}

@@ -91,3 +91,18 @@
     @apply bg-muted-foreground/40;
   }
 }
+
+@keyframes sweep {
+  0%   { transform: translateX(-6rem); }
+  100% { transform: translateX(150vw); }
+}
+
+@utility animate-sweep {
+  animation: sweep 0.9s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes bar-energy-rise {
+  0%   { clip-path: inset(0 0 100% 0); opacity: 0.9; }
+  45%  { clip-path: inset(0 0 0 0);    opacity: 0.55; }
+  100% { clip-path: inset(100% 0 0 0); opacity: 0; }
+}

@@ -15,7 +15,9 @@
       "Bash(git commit -m 'chore: Update package-lock.json to match package.json:*)",
       "Bash(git commit -m 'chore: Regenerate package-lock.json with legacy-peer-deps:*)",
       "Bash(git reset:*)",
-      "Bash(git commit -m 'chore: Regenerate package-lock.json with clean install:*)"
+      "Bash(git commit -m 'chore: Regenerate package-lock.json with clean install:*)",
+      "Bash(npm ls:*)",
+      "Bash(git commit -m 'ci: Use --legacy-peer-deps flag to resolve dependency conflicts:*)"
     ]
   }
 }
