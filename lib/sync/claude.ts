@@ -87,6 +87,7 @@ async function syncFile(filePath: string, project: string): Promise<number> {
     if (entry.type !== "assistant") continue;
     if (!entry.requestId || !entry.timestamp) continue;
     if (!entry.message?.usage) continue;
+    if (entry.message.model === "<synthetic>") continue;
     if (seen.has(entry.requestId)) continue;
     seen.add(entry.requestId);
 

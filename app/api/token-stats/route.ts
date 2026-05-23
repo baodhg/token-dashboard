@@ -220,6 +220,7 @@ export async function GET(request: NextRequest) {
 
   const where = {
     timestamp: { gte: since, lte: toDate },
+    model: { not: "<synthetic>" },
     ...(sourceFilter !== "all" ? { source: sourceFilter } : {}),
   };
 
