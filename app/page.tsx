@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import dynamic from "next/dynamic";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import {
   Zap, ArrowDownLeft, ArrowUpRight, DollarSign,
   RefreshCw, Clock, FolderOpen, Sun, Moon, Laptop,
@@ -294,10 +295,18 @@ function AgentLogo() {
 
 /* ─── page ─────────────────────────────────────────────── */
 
-export default function DashboardPage() {
+function DashboardContent() {
   const { t, locale } = useI18n();
-  const [period, setPeriod]       = useState<Period>("1d");
-  const [source, setSource]       = useState<Source>("all");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+
+  // Initial state from URL or defaults
+  const initialPeriod = (searchParams.get("period") as Period) || "1d";
+  const initialSource = (searchParams.get("source") as Source) || "all";
+
+  const [period, setPeriod]       = useState<Period>(initialPeriod);
+  const [source, setSource]       = useState<Source>(initialSource);
   const [data, setData]           = useState<ApiData | null>(null);
   const [loading, setLoading]     = useState(true);
   const [syncing, setSyncing]         = useState(false);
@@ -306,12 +315,34 @@ export default function DashboardPage() {
   const [recalcMsg, setRecalcMsg]     = useState<string | null>(null);
   const [theme, setTheme]         = useState<"light" | "dark" | "system">("system");
   const [customRange, setCustomRange] = useState(() => ({
-    from: new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0],
-    to: new Date().toISOString().split('T')[0]
+    from: searchParams.get("from") || new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0],
+    to:   searchParams.get("to")   || new Date().toISOString().split('T')[0]
   }));
   const [filterKey, setFilterKey]     = useState(0);
   const [isPollGlow, setIsPollGlow]   = useState(false);
   const glowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync URL when filters change
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("period", period);
+    if (source !== "all") params.set("source", source);
+    else params.delete("source");
+
+    if (period === "custom") {
+      params.set("from", customRange.from);
+      params.set("to", customRange.to);
+    } else {
+      params.delete("from");
+      params.delete("to");
+    }
+
+    const qs = params.toString();
+    const currentQs = searchParams.toString();
+    if (qs !== currentQs) {
+      router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+    }
+  }, [period, source, customRange, pathname, router, searchParams]);
 
   useEffect(() => {
     const t = localStorage.getItem("theme") as "light" | "dark" | "system" | null;
@@ -993,5 +1024,13 @@ export default function DashboardPage() {
 
       </main>
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="h-screen flex items-center justify-center animate-pulse text-muted-foreground font-medium">Loading Dashboard...</div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }

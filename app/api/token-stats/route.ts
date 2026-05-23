@@ -81,9 +81,9 @@ function buildChartData(
     
     if (diffDays <= 1) {
        config = {
-         count: 1440,
-         labelFn: (i) => `${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}`,
-         bucketFn: (ts) => ts.getHours() * 60 + ts.getMinutes(),
+         count: 144,
+         labelFn: (i) => `${String(Math.floor(i / 6)).padStart(2, "0")}:${String((i % 6) * 10).padStart(2, "0")}`,
+         bucketFn: (ts) => ts.getHours() * 6 + Math.floor(ts.getMinutes() / 10),
        };
     } else if (diffDays <= 31) {
        config = {
@@ -142,7 +142,7 @@ function buildChartData(
         },
       },
     };
-    config = configs[period as Exclude<Period, "custom">];
+    config = configs[period as Exclude<Period, "custom">] || configs["1d"];
   }
 
   const { count, labelFn, bucketFn } = config;
