@@ -263,11 +263,13 @@ export default function ModelChart({ data, animationKey = 0 }: Props) {
                   animationBegin={index * 70}
                   shape={(sp: any) => {
                     const entry = group.models[sp.index];
-                    const isUp = entry ? justIncreased.has(entry.model) : false;
+                    if (!entry) return <g />;
+                    
+                    const isUp = justIncreased.has(entry.model);
                     const w = Math.max(sp.width || 0, 0);
                     if (w === 0) return <g />;
                     
-                    const pct = overallMaxTokens > 0 ? entry.totalTokens / overallMaxTokens : 0;
+                    const pct = overallMaxTokens > 0 ? (entry.totalTokens / overallMaxTokens) : 0;
                     const opacity = isUp ? 1 : 0.5 + (pct * 0.5);
 
                     return (
@@ -305,13 +307,15 @@ export default function ModelChart({ data, animationKey = 0 }: Props) {
                     dataKey="totalTokens"
                     content={(props: any) => {
                       const entry = group.models[props.index];
+                      if (!entry) return null;
+
                       return (
                         <AnimatedLabel
-                          key={`label-${entry?.model || props.index}`}
+                          key={`label-${entry.model}`}
                           {...props}
                           overallTotal={overallTotal}
-                          entryKey={entry?.model || props.index}
-                          isIncreased={justIncreased.has(entry?.model)}
+                          entryKey={entry.model}
+                          isIncreased={justIncreased.has(entry.model)}
                         />
                       );
                     }}
