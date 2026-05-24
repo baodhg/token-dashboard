@@ -106,3 +106,74 @@
   45%  { clip-path: inset(0 0 0 0);    opacity: 0.6; }  /* Fully filled */
   100% { clip-path: inset(0 0 0 100%); opacity: 0; }    /* Disappear to right */
 }
+
+/* Glassmorphism shine and lift effects for cards */
+.stat-card-premium {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.stat-card-premium::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -150%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.12) 30%,
+    rgba(255, 255, 255, 0.24) 50%,
+    rgba(255, 255, 255, 0.12) 70%,
+    transparent
+  );
+  transform: skewX(-20deg);
+  pointer-events: none;
+}
+
+.dark .stat-card-premium::before {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.03) 30%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.03) 70%,
+    transparent
+  );
+}
+
+.stat-card-premium:hover::before {
+  left: 150%;
+  transition: all 1.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.stat-card-premium:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.02) !important;
+  border-color: rgba(99, 102, 241, 0.25) !important; /* Indigo glow */
+}
+
+.dark .stat-card-premium:hover {
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 12px 24px -10px rgba(0, 0, 0, 0.3) !important;
+  border-color: rgba(99, 102, 241, 0.4) !important; /* Indigo dark glow */
+}
+
+/* Premium dynamic lifts for chart boxes */
+.chart-container-premium {
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.chart-container-premium:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 20px -8px rgba(0, 0, 0, 0.04), 0 4px 8px -4px rgba(0, 0, 0, 0.02) !important;
+  border-color: rgba(99, 102, 241, 0.15) !important;
+}
+
+.dark .chart-container-premium:hover {
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.3), 0 8px 16px -8px rgba(0, 0, 0, 0.2) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+

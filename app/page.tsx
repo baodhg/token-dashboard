@@ -25,10 +25,11 @@ const ModelChart = dynamic<{ data: ModelStat[]; animationKey?: number }>(
 /* ─── helpers ────────────────────────────────────────── */
 
 function formatK(n: number) {
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
-  if (n >= 1_000_000)     return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000)         return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
+  const rounded = Math.round(n);
+  if (rounded >= 1_000_000_000) return `${(rounded / 1_000_000_000).toFixed(2)}B`;
+  if (rounded >= 1_000_000)     return `${(rounded / 1_000_000).toFixed(2)}M`;
+  if (rounded >= 1_000)         return `${(rounded / 1_000).toFixed(1)}K`;
+  return String(rounded);
 }
 
 function fmtTime(iso: string, locale: string) {
@@ -153,16 +154,16 @@ function StatCard({
   }, [rawValue, filterKey]);
 
   return (
-    <div className={`bg-card rounded-2xl p-5 border shadow-sm flex flex-col gap-3 transition-all duration-500 ${isPollGlow ? "border-emerald-400/30 shadow-emerald-500/8 shadow-md" : "border-border"}`}>
-      <div className={`w-9 h-9 rounded-xl ${iconBg} flex items-center justify-center transition-transform duration-300 ${isPollGlow ? "scale-110" : "scale-100"}`}>
-        <Icon className={`w-4 h-4 ${iconColor}`} />
+    <div className={`bg-card rounded-2xl p-5 border shadow-sm flex flex-col gap-3 transition-all duration-500 stat-card-premium group cursor-pointer ${isPollGlow ? "border-emerald-400/30 shadow-emerald-500/8 shadow-md" : "border-border"}`}>
+      <div className={`w-9 h-9 rounded-xl ${iconBg} flex items-center justify-center transition-all duration-300 group-hover:scale-110 group-hover:rotate-6 ${isPollGlow ? "scale-110" : "scale-100"}`}>
+        <Icon className={`w-4 h-4 ${iconColor} transition-transform duration-300 group-hover:scale-110`} />
       </div>
       <div>
-        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">{label}</p>
-        <p className={`font-numeric text-[26px] font-bold text-foreground leading-none tracking-tight ${loading ? "opacity-30" : ""}`}>
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 group-hover:text-foreground/80 transition-colors duration-300">{label}</p>
+        <p className={`font-numeric text-[26px] font-bold text-foreground leading-none tracking-tight transition-all duration-300 group-hover:text-primary ${loading ? "opacity-30" : ""}`}>
           {loading ? "···" : formatter(displayValue)}
         </p>
-        <p className="text-[11px] text-muted-foreground/60 mt-1.5">{sub}</p>
+        <p className="text-[11px] text-muted-foreground/60 mt-1.5 group-hover:text-muted-foreground/80 transition-colors duration-300">{sub}</p>
       </div>
     </div>
   );
@@ -721,7 +722,7 @@ function DashboardContent() {
 
         {/* Row 2: Cache read bar chart + Tokens theo model */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <div className={`relative lg:col-span-1 bg-card rounded-2xl p-5 border shadow-sm overflow-hidden transition-all duration-700 ${isPollGlow ? "border-cyan-400/25 shadow-cyan-500/5 shadow-md" : "border-border"}`}>
+          <div className={`relative lg:col-span-1 bg-card rounded-2xl p-5 border shadow-sm overflow-hidden chart-container-premium ${isPollGlow ? "border-cyan-400/25 shadow-cyan-500/5 shadow-md" : "border-border"}`}>
             {isPollGlow && (
               <div className="absolute inset-0 pointer-events-none z-10" aria-hidden="true">
                 <div className="absolute top-0 bottom-0 w-24 bg-linear-to-r from-transparent via-white/6 to-transparent dark:via-white/4 animate-sweep" />
@@ -739,7 +740,7 @@ function DashboardContent() {
             </div>
           </div>
 
-          <div className={`relative lg:col-span-2 bg-card rounded-2xl p-5 border shadow-sm overflow-hidden transition-all duration-700 ${isPollGlow ? "border-purple-400/25 shadow-purple-500/5 shadow-md" : "border-border"}`}>
+          <div className={`relative lg:col-span-2 bg-card rounded-2xl p-5 border shadow-sm overflow-hidden chart-container-premium ${isPollGlow ? "border-purple-400/25 shadow-purple-500/5 shadow-md" : "border-border"}`}>
             {isPollGlow && (
               <div className="absolute inset-0 pointer-events-none z-10" aria-hidden="true">
                 <div className="absolute top-0 bottom-0 w-24 bg-linear-to-r from-transparent via-white/6 to-transparent dark:via-white/4 animate-sweep" />
@@ -757,7 +758,7 @@ function DashboardContent() {
         </div>
 
         {/* Row 3: Input / Output line chart */}
-        <div className={`relative bg-card rounded-2xl p-5 border shadow-sm overflow-hidden transition-all duration-700 ${isPollGlow ? "border-indigo-400/25 shadow-indigo-500/5 shadow-md" : "border-border"}`}>
+        <div className={`relative bg-card rounded-2xl p-5 border shadow-sm overflow-hidden chart-container-premium ${isPollGlow ? "border-indigo-400/25 shadow-indigo-500/5 shadow-md" : "border-border"}`}>
           {isPollGlow && (
             <div className="absolute inset-0 pointer-events-none z-10" aria-hidden="true">
               <div className="absolute top-0 bottom-0 w-24 bg-linear-to-r from-transparent via-white/6 to-transparent dark:via-white/4 animate-sweep" />
