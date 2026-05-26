@@ -292,6 +292,7 @@ export async function syncAntigravity(): Promise<SyncResult> {
       distinct: ["sessionId"],
     });
     for (const c of existingCalls) {
+      if (!c.sessionId) continue;
       const convId = c.sessionId.replace("antigravity_", "");
       if (c.project) {
         historyMap.set(convId.toLowerCase(), c.project);

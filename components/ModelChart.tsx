@@ -45,13 +45,13 @@ function calculateBarColor(platformId: string, pct: number, isMax: boolean) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function CustomTooltip({ active, payload, label }: any) {
+function CustomTooltip({ active, payload }: any) {
   const { t } = useI18n();
   if (!active || !payload?.length) return null;
   const d: ModelStat = payload[0]?.payload;
   return (
     <div className="bg-card/95 backdrop-blur-sm rounded-xl shadow-xl border border-border px-4 py-3 text-[12px] min-w-44">
-      <p className="font-semibold text-foreground mb-2">{label}</p>
+      <p className="font-semibold text-foreground mb-2">{d.label}</p>
       <div className="space-y-1.5 text-muted-foreground">
         <div className="flex justify-between gap-6">
           <span>{t("common.input")}</span>
@@ -186,146 +186,155 @@ export default function ModelChart({ data, animationKey = 0 }: Props) {
   const overallTotal = data.reduce((s, d) => s + d.totalTokens, 0);
   const overallMaxTokens = Math.max(...data.map(d => d.totalTokens), 1);
   
-  // Group data by source
-  const groups = PLATFORMS.map(p => {
-    const models = data.filter(d => d.source === p.id)
-      .sort((a, b) => b.totalTokens - a.totalTokens);
-    
-    const platformTotal = models.reduce((s, m) => s + m.totalTokens, 0);
+  // Sort all models globally by totalTokens descending
+  const sortedData = [...data]
+    .sort((a, b) => b.totalTokens - a.totalTokens)
+    .map(d => ({
+      ...d,
+      chartKey: `${d.source}_${d.model}`
+    }));
 
-    return {
-      ...p,
-      models: models.map(m => ({
-        ...m,
-        fillColor: calculateBarColor(p.id, (m.totalTokens / overallMaxTokens) * 100, m.totalTokens === overallMaxTokens)
-      })),
-      platformTotal
-    };
-  })
-    .filter(g => g.models.length > 0)
-    .sort((a, b) => b.platformTotal - a.platformTotal);
+  const chartHeight = sortedData.length * 36 + 20;
+
+  const CustomYAxisTick = (props: any) => {
+    const { x, y, payload } = props;
+    const item = sortedData.find(d => d.chartKey === payload.value);
+    if (!item) return null;
+
+    const platform = PLATFORMS.find(p => p.id === item.source);
+    const iconSrc = platform?.icon ?? "/default-icon.png";
+
+    return (
+      <g transform={`translate(${x}, ${y})`}>
+        {/* Platform Icon */}
+        <image
+          href={iconSrc}
+          x={-145}
+          y={-9}
+          width={18}
+          height={18}
+        />
+        {/* Model Label */}
+        <text
+          x={-120}
+          y={0}
+          dy="0.32em"
+          fill="var(--chart-tick-strong)"
+          fontSize={11}
+          fontWeight={500}
+          fontFamily="inherit"
+          textAnchor="start"
+        >
+          {item.label}
+        </text>
+      </g>
+    );
+  };
 
   return (
-    <div key={animationKey} className="space-y-8">
-      {groups.map((group, index) => (
-        <div key={group.id} className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-700" style={{ animationDelay: `${index * 70}ms` }}>
-          {/* Platform Header with Total */}
-          <div className="flex items-center justify-between border-b border-border/50 pb-2">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-lg bg-muted flex items-center justify-center overflow-hidden shadow-sm">
-                <Image src={group.icon} alt={group.label} width={16} height={16} style={{ width: 16, height: 16, objectFit: "contain", transform: (group.id === "codex" || group.id === "github_copilot") ? "scale(1.35)" : undefined }} />
-              </div>
-              <span className="text-[13px] font-bold text-foreground">{group.label}</span>
-            </div>
-            <div className="flex items-center gap-2 text-[12px]">
-              <span className="text-muted-foreground font-medium">{t("common.total")}:</span>
-              <span className="font-numeric font-bold text-foreground">{formatK(group.platformTotal)}</span>
-              <span className="text-muted-foreground/60 text-[10px]">({Math.round((group.platformTotal / overallTotal) * 100)}%)</span>
-            </div>
-          </div>
+    <div key={animationKey} className="animate-in fade-in slide-in-from-bottom-2 duration-700">
+      <div style={{ height: chartHeight, width: "100%" }}>
+        <ResponsiveContainer width="100%" height={chartHeight}>
+          <BarChart
+            data={sortedData}
+            layout="vertical"
+            margin={{ top: 10, right: 90, left: 4, bottom: 10 }}
+            barSize={16}
+          >
+            <defs>
+              {PLATFORMS.map(p => (
+                <linearGradient key={p.id} id={`gradient-${p.id}`} x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor={p.from} />
+                  <stop offset="100%" stopColor={p.to} />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" horizontal={false} />
+            <XAxis
+              type="number"
+              domain={[0, overallMaxTokens]}
+              hide
+            />
+            <YAxis
+              type="category"
+              dataKey="chartKey"
+              tick={<CustomYAxisTick />}
+              axisLine={false}
+              tickLine={false}
+              width={150}
+            />
+            <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--chart-grid)", opacity: 0.4 }} />
+            <Bar
+              dataKey="totalTokens"
+              radius={[0, 4, 4, 0]}
+              isAnimationActive={shouldAnimate}
+              animationDuration={1000}
+              animationEasing="ease-out"
+              shape={(sp: any) => {
+                const entry = sortedData[sp.index];
+                if (!entry) return <g />;
+                
+                const platform = PLATFORMS.find(p => p.id === entry.source);
+                const isUp = justIncreased.has(entry.model);
+                const w = Math.max(sp.width || 0, 0);
+                if (w === 0) return <g />;
+                
+                const pct = overallMaxTokens > 0 ? (entry.totalTokens / overallMaxTokens) : 0;
+                const opacity = isUp ? 1 : 0.5 + (pct * 0.5);
 
-          {/* Recharts Horizontal Bar Chart for this group */}
-          <div style={{ height: group.models.length * 32 + 20 }}>
-            <ResponsiveContainer width="100%" height={group.models.length * 32 + 20}>
-              <BarChart
-                data={group.models}
-                layout="vertical"
-                margin={{ top: 0, right: 90, left: 4, bottom: 0 }}
-                barSize={16}
-              >
-                <defs>
-                  <linearGradient id={`gradient-${group.id}`} x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor={group.from} />
-                    <stop offset="100%" stopColor={group.to} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" horizontal={false} />
-                <XAxis
-                  type="number"
-                  domain={[0, overallMaxTokens]}
-                  hide
-                />
-                <YAxis
-                  type="category"
-                  dataKey="label"
-                  tick={{ fontSize: 11, fill: "var(--chart-tick-strong)", fontFamily: "inherit", fontWeight: 500 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={120}
-                />
-                <Tooltip content={<CustomTooltip />} cursor={{ fill: "var(--chart-grid)", opacity: 0.4 }} />
-                <Bar
-                  dataKey="totalTokens"
-                  radius={[0, 4, 4, 0]}
-                  isAnimationActive={shouldAnimate}
-                  animationDuration={1000}
-                  animationEasing="ease-out"
-                  animationBegin={index * 70}
-                  shape={(sp: any) => {
-                    const entry = group.models[sp.index];
-                    if (!entry) return <g />;
-                    
-                    const isUp = justIncreased.has(entry.model);
-                    const w = Math.max(sp.width || 0, 0);
-                    if (w === 0) return <g />;
-                    
-                    const pct = overallMaxTokens > 0 ? (entry.totalTokens / overallMaxTokens) : 0;
-                    const opacity = isUp ? 1 : 0.5 + (pct * 0.5);
-
-                    return (
-                      <g>
-                        <rect
-                          x={sp.x} y={sp.y} width={w} height={sp.height}
-                          fill={sp.fill}
-                          fillOpacity={opacity}
-                          stroke={isUp ? `rgba(${group.color}, 0.7)` : "none"}
-                          strokeWidth={isUp ? 1.5 : 0}
-                          rx={4} ry={4}
-                        />
-                        {isUp && (
-                          <rect
-                            x={sp.x} y={sp.y} width={w} height={sp.height}
-                            rx={4} ry={4}
-                            fill="rgba(255,255,255,0.45)"
-                            style={{ animation: "bar-energy-rise 0.85s cubic-bezier(0.4, 0, 0.2, 1) forwards" }}
-                          />
-                        )}
-                      </g>
-                    );
-                  }}
-                >
-                  {group.models.map((entry) => {
-                    const isUp = justIncreased.has(entry.model);
-                    return (
-                      <Cell
-                        key={entry.model}
-                        fill={isUp ? `rgba(${group.color}, 1)` : entry.fillColor}
+                return (
+                  <g>
+                    <rect
+                      x={sp.x} y={sp.y} width={w} height={sp.height}
+                      fill={`url(#gradient-${entry.source})`}
+                      fillOpacity={opacity}
+                      stroke={isUp ? `rgba(${platform?.color || "255,255,255"}, 0.7)` : "none"}
+                      strokeWidth={isUp ? 1.5 : 0}
+                      rx={4} ry={4}
+                    />
+                    {isUp && (
+                      <rect
+                        x={sp.x} y={sp.y} width={w} height={sp.height}
+                        rx={4} ry={4}
+                        fill="rgba(255,255,255,0.45)"
+                        style={{ animation: "bar-energy-rise 0.85s cubic-bezier(0.4, 0, 0.2, 1) forwards" }}
                       />
-                    );
-                  })}
-                  <LabelList
-                    dataKey="totalTokens"
-                    content={(props: any) => {
-                      const entry = group.models[props.index];
-                      if (!entry) return null;
-
-                      return (
-                        <AnimatedLabel
-                          key={`label-${entry.model}`}
-                          {...props}
-                          overallTotal={overallTotal}
-                          entryKey={entry.model}
-                          isIncreased={justIncreased.has(entry.model)}
-                        />
-                      );
-                    }}
+                    )}
+                  </g>
+                );
+              }}
+            >
+              {sortedData.map((entry) => {
+                const isUp = justIncreased.has(entry.model);
+                const platform = PLATFORMS.find(p => p.id === entry.source);
+                return (
+                  <Cell
+                    key={entry.chartKey}
+                    fill={isUp ? `rgba(${platform?.color || "255,255,255"}, 1)` : `url(#gradient-${entry.source})`}
                   />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      ))}
+                );
+              })}
+              <LabelList
+                dataKey="totalTokens"
+                content={(props: any) => {
+                  const entry = sortedData[props.index];
+                  if (!entry) return null;
+
+                  return (
+                    <AnimatedLabel
+                      key={`label-${entry.chartKey}`}
+                      {...props}
+                      overallTotal={overallTotal}
+                      entryKey={entry.chartKey}
+                      isIncreased={justIncreased.has(entry.model)}
+                    />
+                  );
+                }}
+              />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }

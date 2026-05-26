@@ -138,7 +138,11 @@ function StatCard({
     prevFilterKeyRef.current = filterKey;
     const startValue = filterKeyChanged ? 0 : displayRef.current;
     const endValue = rawValue;
-    if (startValue === endValue) return;
+    if (startValue === endValue) {
+      setDisplayValue(endValue);
+      displayRef.current = endValue;
+      return;
+    }
     let startTime: number | null = null;
     const step = (ts: number) => {
       if (!startTime) startTime = ts;

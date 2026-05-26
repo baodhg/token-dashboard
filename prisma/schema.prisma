@@ -36,6 +36,7 @@ model PriceConfig {
   unitPriceInput  Float
   unitPriceOutput Float
   unitPriceCache  Float    @default(0)
+  unitPriceCacheWrite Float @default(0)
   version         String   // e.g., "2024-v1"
   isCurrent       Boolean  @default(true)
   createdAt       DateTime @default(now())
