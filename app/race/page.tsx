@@ -376,12 +376,14 @@ function RaceContent() {
     return qs.toString();
   }, [source]);
 
-  const fetchMyTokens = useCallback((p: Period) => {
-    fetch(`/api/token-stats?${buildQs(p)}`)
+  const fetchMyTokens = useCallback((_p: Period) => {
+    // Always use all-time total for race score — independent of the UI period filter.
+    // Using the filtered period caused wildly different scores (e.g. ALL = 16M vs 1D = 594K).
+    fetch(`/api/token-stats?period=all`)
       .then((r) => r.json())
       .then((d) => { setMyTokens(d?.summary?.total ?? 0); setLastRefresh(Date.now()); })
       .catch(() => {});
-  }, [buildQs]);
+  }, []);
 
   const pollTick = useCallback((p: Period) => {
     fetch("/api/sync", { method: "POST" })
