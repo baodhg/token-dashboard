@@ -1,6 +1,5 @@
 require("dotenv").config();
 const { createServer } = require("http");
-const { Server } = require("socket.io");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { Pool } = require("pg");
@@ -46,11 +45,7 @@ async function initDb() {
   console.log("[db] tables ready");
 }
 
-// ── In-memory player state ────────────────────────────────────────────────────
-const players = new Map(); // socketId → { name, totalTokens, updatedAt }
-const TIMEOUT_MS = 45_000;
-
-// Latest snapshot per player from DB — loaded on startup + refreshed after each snapshot
+// ── In-memory player state (updated by /report, persisted to DB every 60s) ───
 let dbSnapshot = new Map(); // name → { name, totalTokens, updatedAt }
 
 async function loadDbSnapshot() {
@@ -69,21 +64,6 @@ async function loadDbSnapshot() {
   } catch (e) { console.error("[db] loadDbSnapshot error", e.message); }
 }
 
-function broadcast() {
-  const now = Date.now();
-  for (const [id, p] of players) {
-    if (now - p.updatedAt > TIMEOUT_MS) players.delete(id);
-  }
-  // Merge: in-memory (realtime) takes priority over DB snapshot (offline players)
-  const merged = new Map(dbSnapshot);
-  for (const p of players.values()) {
-    merged.set(p.name, p); // online player overrides DB value
-  }
-  const list = [...merged.values()].map((p) => ({
-    name: p.name, totalTokens: p.totalTokens, updatedAt: p.updatedAt,
-  }));
-  io.emit("players_update", list);
-}
 
 async function snapshotPlayers() {
   if (dbSnapshot.size === 0) return;
@@ -132,6 +112,14 @@ const httpServer = createServer(async (req, res) => {
   // ── Health ────────────────────────────────────────────────────────────────
   if (urlPath === "/health" && req.method === "GET") {
     return json(res, 200, { status: "ok", players: players.size, tracked: dbSnapshot.size });
+  }
+
+  // ── Live: current player state for canvas polling (no WebSocket needed) ─────
+  if (urlPath === "/live" && req.method === "GET") {
+    const list = [...dbSnapshot.values()].map((p) => ({
+      name: p.name, totalTokens: p.totalTokens, updatedAt: p.updatedAt,
+    }));
+    return json(res, 200, { players: list });
   }
 
   if (urlPath === "/report" && req.method === "POST") {
@@ -298,39 +286,6 @@ const httpServer = createServer(async (req, res) => {
   res.writeHead(404); res.end();
 });
 
-const io = new Server(httpServer, {
-  cors: { origin: ALLOWED_ORIGINS, methods: ["GET", "POST"] },
-});
-
-io.on("connection", (socket) => {
-  console.log(`[connect] ${socket.id}`);
-
-  // Send current state immediately on connect — includes offline players from DB
-  const merged = new Map(dbSnapshot);
-  for (const p of players.values()) merged.set(p.name, p);
-  socket.emit("players_update", [...merged.values()].map(p => ({
-    name: p.name, totalTokens: p.totalTokens, updatedAt: p.updatedAt,
-  })));
-
-  socket.on("player_update", ({ token, totalTokens }) => {
-    let payload;
-    try { payload = jwt.verify(token, JWT_SECRET); } catch { return; }
-    if (typeof totalTokens !== "number" || !isFinite(totalTokens)) return;
-    players.set(socket.id, {
-      name: payload.name,
-      totalTokens: Math.max(0, Math.floor(totalTokens)),
-      updatedAt: Date.now(),
-    });
-    broadcast();
-  });
-
-  socket.on("disconnect", () => {
-    players.delete(socket.id);
-    broadcast();
-  });
-});
-
-setInterval(broadcast, 15_000);
 setInterval(snapshotPlayers, SNAPSHOT_INTERVAL_MS);
 
 // ── Start ─────────────────────────────────────────────────────────────────────

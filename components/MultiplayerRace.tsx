@@ -2,7 +2,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { io, Socket } from "socket.io-client";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface PlayerStat {
@@ -14,8 +13,8 @@ export interface PlayerStat {
 interface MultiplayerRaceProps {
   serverUrl: string;
   playerName: string;
-  /** JWT token from auth — sent with every player_update to prove identity. */
-  playerToken: string;
+  /** JWT token — kept for future use, not used for canvas polling. */
+  playerToken?: string;
   /** Current player's totalTokens — caller keeps fetching and passes it in. */
   myTokens: number;
   onExit?: () => void;
@@ -495,12 +494,11 @@ function CountUp({ value, className, style }: { value: number; className?: strin
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function MultiplayerRace({ serverUrl, playerName, playerToken, myTokens, onExit }: MultiplayerRaceProps) {
+export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExit }: MultiplayerRaceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const labelRefs = useRef<(HTMLDivElement | null)[]>([]);
   const galaxyRef = useRef<ReturnType<typeof createGalaxy> | null>(null);
   const engineRef = useRef<ReturnType<typeof createPlayerRockets> | null>(null);
-  const socketRef = useRef<Socket | null>(null);
   const animRef = useRef(0);
 
   const [connected, setConnected] = useState(false);
@@ -527,32 +525,22 @@ export default function MultiplayerRace({ serverUrl, playerName, playerToken, my
     engineRef.current?.setPlayers(rankedPlayers);
   }, [rankedPlayers]);
 
-  // Socket.io connection
+  // Poll GET /live every 5s — no WebSocket needed.
+  // Reporting happens server-side via /api/sync → POST /report regardless of browser state.
   useEffect(() => {
-    const socket = io(serverUrl, { transports: ["websocket", "polling"], timeout: 8000 });
-    socketRef.current = socket;
-    socket.on("connect", () => setConnected(true));
-    socket.on("disconnect", () => setConnected(false));
-    socket.on("players_update", (list: PlayerStat[]) => setPlayers(list));
-    return () => { socket.disconnect(); };
-  }, [serverUrl]);
-
-  // Send my tokens on every change + heartbeat every 10s
-  useEffect(() => {
-    const s = socketRef.current;
-    if (!s || !connected) return;
-    s.emit("player_update", { token: playerToken, totalTokens: myTokens });
-  }, [myTokens, playerName, connected]);
-
-  useEffect(() => {
-    const s = socketRef.current;
-    if (!s || !connected) return;
-    const id = setInterval(() => {
-      s.emit("player_update", { token: playerToken, totalTokens: myTokens });
-    }, 10_000);
+    const poll = () => {
+      fetch(`${serverUrl}/live`)
+        .then((r) => r.json())
+        .then((d) => {
+          setPlayers(d.players ?? []);
+          setConnected(true);
+        })
+        .catch(() => setConnected(false));
+    };
+    poll();
+    const id = setInterval(poll, 5_000);
     return () => clearInterval(id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connected, playerName]);
+  }, [serverUrl]);
 
   // Scroll lock + Escape
   useEffect(() => {
