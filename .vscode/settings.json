@@ -1,0 +1,16 @@
+{
+  // Tailwind CSS v4 uses at-rules (@theme, @apply, @utility, @custom-variant,
+  // @variant) that the built-in VS Code CSS language server doesn't recognize.
+  // Disable its validation and let the Tailwind CSS IntelliSense extension
+  // (recommended in .vscode/extensions.json) handle these files instead.
+  "css.lint.unknownAtRules": "ignore",
+  "scss.lint.unknownAtRules": "ignore",
+  "less.lint.unknownAtRules": "ignore",
+  "css.validate": false,
+  "files.associations": {
+    "*.css": "tailwindcss"
+  },
+  "tailwindCSS.includeLanguages": {
+    "tailwindcss": "css"
+  }
+}

@@ -6,6 +6,7 @@ import React, { useEffect, useMemo, useRef } from "react";
 export interface RaceModelStat {
   model: string;
   totalTokens: number;
+  source?: string;
 }
 
 interface ModelRaceProps {
@@ -14,7 +15,7 @@ interface ModelRaceProps {
   onExit?: () => void;
 }
 
-// Per-model neon palette
+// Fallback neon palette (used only when a model has no recognizable platform)
 const COLORS = [
   "#10b981", // emerald
   "#a855f7", // purple
@@ -25,9 +26,139 @@ const COLORS = [
   "#eab308", // amber
 ];
 
+// ── Platform brand colors (sampled from each tool's logo) ──
+// Keyed by source value AND by model-id prefix so it works whether or not the
+// row carries a `source` field.
+const PLATFORM_HUE: Record<string, { h: number; s: number; l: number }> = {
+  claude_code:     { h: 18,  s: 78, l: 58 },  // claude orange
+  cline:           { h: 158, s: 64, l: 45 },  // emerald
+  codex:           { h: 255, s: 70, l: 65 },  // codex violet
+  gemini:          { h: 231, s: 70, l: 62 },  // gemini indigo/blue
+  antigravity_cli: { h: 217, s: 82, l: 60 },  // google blue
+  github_copilot:  { h: 190, s: 72, l: 55 },  // copilot cyan
+  cursor:          { h: 240, s: 6,  l: 60 },  // zinc
+};
+function platformKey(source: string | undefined, model: string): string {
+  if (source && PLATFORM_HUE[source]) return source;
+  const m = (model || "").toLowerCase();
+  if (m.startsWith("claude")) return "claude_code";
+  if (m.startsWith("gpt") || m.startsWith("codex") || /^o[134]/.test(m)) return "codex";
+  if (m.startsWith("gemini") || m.startsWith("gemma")) return "gemini";
+  if (m.includes("copilot")) return "github_copilot";
+  if (m.includes("cursor")) return "cursor";
+  if (m.includes("cline")) return "cline";
+  if (m.includes("antigravity")) return "antigravity_cli";
+  return "";
+}
+// HSL → #rrggbb so the rest of the engine (hexA / shade) keeps working on hex.
+function hslToHex(h: number, s: number, l: number): string {
+  h = ((h % 360) + 360) % 360; s /= 100; l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60)       { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else              { r = c; b = x; }
+  const to = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+  return `#${to(r)}${to(g)}${to(b)}`;
+}
+// Build a platform-family color variant, returned as hex.
+//  variant 0..N-1  → hue/lightness fan-out within the brand family (max ~20)
+//  intensity 0..1  → token weight: higher = more saturated & vivid
+function platformColor(key: string, variant: number, variantCount: number, intensity: number): string {
+  const base = PLATFORM_HUE[key];
+  if (!base) return COLORS[variant % COLORS.length];
+  const span = Math.min(Math.max(variantCount, 1), 20);
+  // Fan hue ±26° and lightness across the family, ordered by variant
+  const frac = span > 1 ? variant / (span - 1) : 0;     // 0 = top token model
+  const hue = base.h + (frac - 0.5) * 52;
+  // Token intensity drives saturation & vividness: leader = punchy, tail = muted
+  const sat = Math.min(95, base.s * (0.55 + intensity * 0.45));
+  const light = Math.min(72, Math.max(34, base.l * (0.82 + intensity * 0.30) - frac * 6));
+  return hslToHex(hue, sat, light);
+}
+
 const TAU = Math.PI * 2;
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const rndi = (a: number, b: number) => Math.floor(rnd(a, b + 1));
+
+// ── Model → platform logo (prefix match on the model ID) ──
+function logoSrcFor(model: string): string | null {
+  const m = (model || "").toLowerCase();
+  if (m.startsWith("claude")) return "/claude.png";
+  if (m.startsWith("gpt") || m.startsWith("codex") || m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4")) return "/codex.png";
+  if (m.startsWith("gemini") || m.startsWith("gemma")) return "/geminicli.png";
+  if (m.includes("copilot")) return "/github.png";
+  if (m.includes("cursor")) return "/cursor.png";
+  if (m.includes("cline")) return "/cline.png";
+  if (m.includes("antigravity")) return "/antigravity.png";
+  return null;
+}
+
+// Image cache shared across the component lifetime. Each entry tracks load
+// state plus the opaque-pixel bounding box, so every logo can be normalized to
+// the same visual size regardless of its own internal transparent padding.
+type LogoEntry = {
+  img: HTMLImageElement;
+  loaded: boolean;
+  // tight bbox of non-transparent pixels, in source-image pixels
+  bx: number; by: number; bw: number; bh: number;
+};
+const _logoCache = new Map<string, LogoEntry>();
+
+// Scan the image's alpha channel to find the tight bounding box of its content.
+function measureLogo(entry: LogoEntry) {
+  const { img } = entry;
+  const w = img.naturalWidth, h = img.naturalHeight;
+  if (!w || !h) { entry.bx = 0; entry.by = 0; entry.bw = 1; entry.bh = 1; return; }
+  try {
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const cx = cv.getContext("2d", { willReadFrequently: true });
+    if (!cx) throw new Error("no ctx");
+    cx.drawImage(img, 0, 0);
+    const data = cx.getImageData(0, 0, w, h).data;
+    let minX = w, minY = h, maxX = 0, maxY = 0, found = false;
+    const ALPHA = 24; // ignore near-transparent edges
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (data[(y * w + x) * 4 + 3] > ALPHA) {
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+          found = true;
+        }
+      }
+    }
+    if (found) {
+      entry.bx = minX; entry.by = minY;
+      entry.bw = maxX - minX + 1; entry.bh = maxY - minY + 1;
+    } else {
+      entry.bx = 0; entry.by = 0; entry.bw = w; entry.bh = h;
+    }
+  } catch {
+    // CORS-tainted or unsupported — fall back to full image
+    entry.bx = 0; entry.by = 0; entry.bw = w; entry.bh = h;
+  }
+}
+
+function getLogo(model: string): LogoEntry | null {
+  const src = logoSrcFor(model);
+  if (!src) return null;
+  let entry = _logoCache.get(src);
+  if (!entry) {
+    const img = new Image();
+    entry = { img, loaded: false, bx: 0, by: 0, bw: 1, bh: 1 };
+    const e = entry;
+    img.onload = () => { measureLogo(e); e.loaded = true; };
+    img.src = src;
+    _logoCache.set(src, entry);
+  }
+  return entry;
+}
 
 function shade(hex: string, amt: number): string {
   if (!hex || hex[0] !== "#") return hex || "#888";
@@ -114,7 +245,7 @@ function createGalaxy() {
   function spawnAsteroid() {
     // Entry from upper-right quadrant, steep reentry angle like capsule aerobraking
     const ang = rnd(Math.PI * 0.58, Math.PI * 0.76); // ~105–137° — steep downward-left
-    const speed = rnd(5, 10);
+    const speed = rnd(2.2, 4.5);
     const radius = rnd(4, 11);
     const x = rnd(W * 0.4, W + 80);
     const y = rnd(-60, H * 0.25);
@@ -673,6 +804,11 @@ function createGalaxy() {
 // ════════════════════════════════════════════════════════════════════════════
 //  ROCKETS ENGINE
 // ════════════════════════════════════════════════════════════════════════════
+// Burst sustains ~11s @60fps — slightly longer than the 10s poll, so back-to-back
+// token gains chain seamlessly with no plasma gap. Gain pulse (green flash + ↑)
+// runs ~1.8s.
+const BURST_FRAMES = 660;
+
 function createRockets() {
   let W = 0, H = 0, destX = 0;
   let rockets: any[] = [];
@@ -701,10 +837,41 @@ function createRockets() {
   function drawSparks(ctx: CanvasRenderingContext2D) {
     for (let i = sparks.length - 1; i >= 0; i--) {
       const p = sparks[i];
-      p.x += p.vx; p.y += p.vy; p.vx *= 0.95; p.vy *= 0.95; p.life--;
-      if (p.life <= 0) { sparks.splice(i, 1); continue; }
+      if (p.kind === "shock") {
+        // Stationary ring — vx encodes radius scale, don't translate it
+        p.life--;
+        if (p.life <= 0) { sparks.splice(i, 1); continue; }
+      } else {
+        p.x += p.vx; p.y += p.vy; p.vx *= 0.95; p.vy *= 0.95; p.life--;
+        if (p.life <= 0) { sparks.splice(i, 1); continue; }
+      }
       const r = p.life / p.max;
-      if (p.kind === "smoke") {
+      if (p.kind === "shock") {
+        // Sonic-boom ring: expands and fades
+        const prog = 1 - r;
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = r * 0.8;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = Math.max(0.5, p.size * r);
+        ctx.shadowBlur = 12; ctx.shadowColor = p.color;
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, p.size * 2 + prog * p.vx, p.size + prog * p.vx * 0.55, 0, 0, TAU);
+        ctx.stroke();
+        ctx.restore();
+      } else if (p.kind === "warp") {
+        // Hyperdrive streak: long thin light trail
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = r * 0.95;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = Math.max(0.4, p.size * r);
+        ctx.shadowBlur = 6; ctx.shadowColor = p.color;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * (4 + (1 - r) * 10), p.y - p.vy * 4);
+        ctx.stroke();
+        ctx.restore();
+      } else if (p.kind === "smoke") {
         ctx.globalAlpha = r * 0.22; ctx.fillStyle = p.color;
         ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (1.6 - r * 0.6), 0, TAU); ctx.fill();
       } else if (p.kind === "ember") {
@@ -740,10 +907,11 @@ function createRockets() {
     ctx.closePath(); ctx.fill();
   }
 
-  function drawFlame(ctx: CanvasRenderingContext2D, thrust: number, color: string, t: number, seed: number) {
+  function drawFlame(ctx: CanvasRenderingContext2D, thrust: number, color: string, t: number, seed: number, boost: number) {
     const fl = 0.78 + Math.sin(t * 0.6 + seed) * 0.14 + Math.sin(t * 1.7 + seed * 2) * 0.08;
-    const len = (54 + thrust * 150) * fl;
-    const wid = 7 + thrust * 7;
+    // boost (0..1) = afterburner/surge — stretches & fattens the plasma trail
+    const len = (54 + thrust * 150) * fl * (1 + boost * 1.5);
+    const wid = (7 + thrust * 7) * (1 + boost * 0.6);
     const sway = Math.sin(t * 0.9 + seed) * 2.2 * thrust;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -783,39 +951,71 @@ function createRockets() {
     ctx.restore();
   }
 
-  function drawBody(ctx: CanvasRenderingContext2D, color: string) {
-    ctx.fillStyle = shade(color, -40); ctx.strokeStyle = color; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(4, -10); ctx.lineTo(16, -19); ctx.lineTo(24, -10); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(4, 10); ctx.lineTo(16, 19); ctx.lineTo(24, 10); ctx.closePath(); ctx.fill(); ctx.stroke();
-    const bell = ctx.createLinearGradient(-7, 0, 6, 0);
-    bell.addColorStop(0, "#2a2a30"); bell.addColorStop(1, "#6a6a74");
-    ctx.fillStyle = bell;
-    ctx.beginPath(); ctx.moveTo(6, -7); ctx.lineTo(-6, -10); ctx.lineTo(-6, 10); ctx.lineTo(6, 7); ctx.closePath(); ctx.fill();
+  // Fallback metallic capsule when a logo image hasn't loaded yet (or no logo maps).
+  function drawCapsule(ctx: CanvasRenderingContext2D, color: string, R: number) {
+    ctx.save();
+    ctx.scale(R / 22, R / 22); // capsule was authored around a ~22px radius
     const body = ctx.createLinearGradient(0, -11, 0, 11);
     body.addColorStop(0, "#e8edf5"); body.addColorStop(0.3, "#c2cad6"); body.addColorStop(0.5, "#f4f7fb");
     body.addColorStop(0.7, "#aab2c0"); body.addColorStop(1, "#767d8c");
     ctx.fillStyle = body;
     ctx.beginPath();
-    ctx.moveTo(4, -11); ctx.lineTo(54, -11);
-    ctx.quadraticCurveTo(78, -10, 84, 0);
-    ctx.quadraticCurveTo(78, 10, 54, 11); ctx.lineTo(4, 11);
-    ctx.quadraticCurveTo(0, 0, 4, -11); ctx.closePath(); ctx.fill();
+    ctx.moveTo(-18, -11); ctx.lineTo(14, -11);
+    ctx.quadraticCurveTo(20, 0, 14, 11); ctx.lineTo(-18, 11);
+    ctx.quadraticCurveTo(-22, 0, -18, -11); ctx.closePath(); ctx.fill();
     ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(60, -10.2); ctx.quadraticCurveTo(78, -9.4, 84, 0);
-    ctx.quadraticCurveTo(78, 9.4, 60, 10.2); ctx.quadraticCurveTo(64, 0, 60, -10.2); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = color; ctx.lineWidth = 2.2; ctx.globalAlpha = 0.9;
-    ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(54, 0); ctx.stroke(); ctx.globalAlpha = 1;
-    const win = ctx.createRadialGradient(46, -2, 0, 46, 0, 7);
-    win.addColorStop(0, "#bdf0ff"); win.addColorStop(0.6, "#3aa6e0"); win.addColorStop(1, "#0a4a78");
-    ctx.fillStyle = win; ctx.beginPath(); ctx.ellipse(46, 0, 6.5, 5, 0, 0, TAU); ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 1; ctx.stroke();
-    ctx.fillStyle = color; ctx.shadowBlur = 6; ctx.shadowColor = color;
-    ctx.beginPath(); ctx.arc(24, -10, 1.6, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(24, 10, 1.6, 0, TAU); ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = "rgba(60,70,90,0.35)"; ctx.lineWidth = 0.6;
-    [20, 34, 48].forEach((px) => { ctx.beginPath(); ctx.moveTo(px, -10.5); ctx.lineTo(px, 10.5); ctx.stroke(); });
+    ctx.beginPath(); ctx.arc(2, 0, 5, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+
+  // Every logo renders at the SAME on-screen footprint, regardless of how much
+  // transparent padding its source file carries. SHIP_SIZE = the target length
+  // (px) of the logo's longest content edge.
+  const SHIP_SIZE = 46;
+
+  // The logo IS the spaceship. No frame/disc/rim — just the normalized .png,
+  // a soft color aura, and a gentle glow so it pops against the galaxy.
+  function drawShip(
+    ctx: CanvasRenderingContext2D,
+    color: string,
+    model: string,
+    rank: number,
+    thrust: number,
+    t: number,
+    seed: number,
+  ) {
+    const rankGlow = 1 - rank / 8;           // glow only varies by rank, not size
+    const pulse = 0.5 + Math.sin(t * 2.2 + seed) * 0.5;
+    const auraR = SHIP_SIZE * (0.85 + thrust * 0.28 + pulse * 0.1);
+
+    // ── Soft energy aura behind the logo (subtle, additive, no hard edges) ──
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const aura = ctx.createRadialGradient(0, 0, SHIP_SIZE * 0.2, 0, 0, auraR);
+    aura.addColorStop(0, hexA(color, (0.22 + pulse * 0.12) * (0.5 + rankGlow * 0.5)));
+    aura.addColorStop(0.5, hexA(color, 0.08 * rankGlow));
+    aura.addColorStop(1, "transparent");
+    ctx.fillStyle = aura;
+    ctx.beginPath(); ctx.arc(0, 0, auraR, 0, TAU); ctx.fill();
+    ctx.restore();
+
+    const logo = getLogo(model);
+    if (logo && logo.loaded) {
+      // Normalize: scale so the logo's content bbox longest edge == SHIP_SIZE,
+      // then draw the whole image offset so the bbox center sits at (0,0).
+      const scale = SHIP_SIZE / Math.max(logo.bw, logo.bh);
+      const drawW = logo.img.naturalWidth * scale;
+      const drawH = logo.img.naturalHeight * scale;
+      const cx = (logo.bx + logo.bw / 2) * scale; // bbox center in scaled space
+      const cy = (logo.by + logo.bh / 2) * scale;
+      ctx.save();
+      ctx.shadowBlur = 14 + pulse * 6;
+      ctx.shadowColor = hexA(color, 0.6 * rankGlow);
+      ctx.drawImage(logo.img, -cx, -cy, drawW, drawH);
+      ctx.restore();
+    } else {
+      drawCapsule(ctx, color, SHIP_SIZE * 0.5);
+    }
   }
 
   return {
@@ -825,13 +1025,26 @@ function createRockets() {
 
       rockets = list.map((m, i) => {
         const old = prev.get(m.model);
-        // Detect token surge → trigger afterburner burst
+        // Detect token surge → trigger / refill the afterburner burst.
         const prevTokens = old ? old.totalTokens : m.totalTokens;
         const gained = m.totalTokens - prevTokens;
-        // Burst if gained >0.5% of max (real growth, not just rounding)
-        const burstTimer = old
-          ? (gained > newMax * 0.005 ? 90 : old.burstTimer > 0 ? old.burstTimer : 0)
-          : 0;
+        // Real growth (not rounding noise). Refill the burst to full so it
+        // sustains all the way to (and across) the next sync — keeps the plasma
+        // continuous if tokens keep arriving every poll.
+        const grew = old && gained > Math.max(1, newMax * 0.0005);
+        const burstTimer = grew
+          ? BURST_FRAMES
+          : old ? Math.max(0, old.burstTimer || 0) : 0;
+        // Rank trend (0 = leader). Smaller rank = better. Compare to last layout.
+        // Persisted on the rocket so the label arrow reflects current standing.
+        const oldRank = old ? old.rank : i;
+        let trend: "up" | "down" | "same" = old ? (old.trend || "same") : "same";
+        if (old) {
+          if (i < oldRank) trend = "up";        // moved toward the front → overtook
+          else if (i > oldRank) trend = "down"; // fell back → got overtaken
+          // equal rank: keep the previous trend so a one-off equal poll doesn't
+          // flip a freshly-earned arrow back to neutral
+        }
         return {
           model: m.model, totalTokens: m.totalTokens, color: m.color, i,
           x: old ? old.x : 70, y: old ? old.y : 0,
@@ -839,6 +1052,11 @@ function createRockets() {
           thrust: old ? old.thrust : 0,
           bob: old ? old.bob : rnd(0, TAU),
           burstTimer,
+          burstStart: grew,                     // fired a fresh shockwave this update
+          rank: i,                              // current grid position (0 = leader)
+          prevRank: old ? old.rank : i,         // for sonic-boom overtake detection
+          trend,                                // up | down | same — drives label arrow
+          boomTimer: old ? (old.boomTimer || 0) : 0,
         };
       });
       maxTokens = newMax;
@@ -871,39 +1089,95 @@ function createRockets() {
         // Burst countdown — decay toward 0
         if (r.burstTimer > 0) r.burstTimer--;
 
-        // Thrust: burst phase holds near 1.0, otherwise track pixel speed
-        const burstRatio = r.burstTimer / 90;
+        // Thrust during burst: a hard kick in the first ~40 frames, then settle
+        // to a sustained HIGH plasma cruise (≈0.85) that holds the whole burst —
+        // so it stays big & continuous between syncs instead of fading after 1.5s.
+        const ramp = (BURST_FRAMES - r.burstTimer) / 40; // 0→1 over first 40 frames
+        const kick = ramp < 1 ? 1.0 : 0.85;
         const thrustTarget = r.burstTimer > 0
-          ? 0.7 + burstRatio * 0.3          // 0.7→1.0 during burst, fading out
+          ? kick
           : 0.35 + pixelSpeed * 0.65;        // normal idle→cruise
-        r.thrust += (thrustTarget - r.thrust) * 0.08;
+        r.thrust += (thrustTarget - r.thrust) * 0.1;
 
         r.bob += 0.05;
         const y = laneAt(i) + Math.sin(r.bob) * 2.4;
         r.y = y;
 
         // More sparks during burst
-        const sparkThreshold = r.burstTimer > 0 ? 0.05 : 0.15;
+        const sparkThreshold = r.burstTimer > 0 ? 0.03 : 0.15;
         if (Math.random() > sparkThreshold) emitSparks(r.x - 6, y, r.color, r.thrust);
 
-        // Extra burst shockwave ring at burst start
-        if (r.burstTimer === 89) {
-          for (let k = 0; k < 12; k++) {
+        // Big shockwave + ember blast at the moment a fresh gain lands
+        if (r.burstStart) {
+          r.burstStart = false;
+          sparks.push({ x: r.x, y, vx: 30, vy: 0, life: 34, max: 34, size: 12, color: "#ffffff", kind: "shock" });
+          sparks.push({ x: r.x, y, vx: 44, vy: 0, life: 40, max: 40, size: 16, color: r.color, kind: "shock" });
+          for (let k = 0; k < 22; k++) {
             sparks.push({
-              x: r.x - 6, y: y + rnd(-8, 8),
-              vx: -rnd(6, 18), vy: rnd(-4, 4),
-              life: rnd(18, 36), max: 36, size: rnd(2, 4),
-              color: r.color, kind: "ember",
+              x: r.x - 6, y: y + rnd(-10, 10),
+              vx: -rnd(8, 26), vy: rnd(-6, 6),
+              life: rnd(20, 44), max: 44, size: rnd(2.4, 5),
+              color: Math.random() > 0.45 ? r.color : "#ffffff", kind: "ember",
+            });
+          }
+        }
+
+        // ── Sonic boom on rank overtake (moved up the grid) ──
+        if (r.prevRank > r.rank) {
+          r.boomTimer = 22;
+          r.prevRank = r.rank;        // consume — fire once per overtake
+          // emit a couple of expanding shock rings + a flash burst of warp embers
+          for (let k = 0; k < 2; k++) {
+            sparks.push({
+              x: r.x, y, vx: 18 + k * 14, vy: 0,
+              life: 26, max: 26, size: 6 + k * 3,
+              color: "#ffffff", kind: "shock",
+            });
+          }
+          sparks.push({ x: r.x, y, vx: 26, vy: 0, life: 30, max: 30, size: 10, color: r.color, kind: "shock" });
+          for (let k = 0; k < 16; k++) {
+            sparks.push({
+              x: r.x, y: y + rnd(-6, 6),
+              vx: rnd(-20, 24), vy: rnd(-8, 8),
+              life: rnd(14, 30), max: 30, size: rnd(2, 4.5),
+              color: Math.random() > 0.5 ? "#ffffff" : r.color, kind: "ember",
+            });
+          }
+        }
+        if (r.boomTimer > 0) r.boomTimer--;
+
+        // ── Hyperdrive warp streaks while surging (burst) ──
+        if (r.burstTimer > 0 && Math.random() > 0.35) {
+          const streaks = 1 + Math.floor(Math.random() * 2);
+          for (let k = 0; k < streaks; k++) {
+            const ringR = (16 - r.rank) + rnd(2, 10);
+            const ang = rnd(0, TAU);
+            sparks.push({
+              x: r.x + Math.cos(ang) * ringR,
+              y: y + Math.sin(ang) * ringR * 0.7,
+              vx: rnd(8, 22), vy: rnd(-1.5, 1.5),
+              life: rnd(12, 22), max: 22, size: rnd(1.2, 2.6),
+              color: Math.random() > 0.4 ? r.color : "#bfe9ff", kind: "warp",
             });
           }
         }
 
         ctx.save();
         ctx.translate(r.x, y);
-        drawFlame(ctx, r.thrust, r.color, t, r.seed);
-        drawBody(ctx, r.color);
+        // boost: full while bursting (with an extra kick the first ~40 frames),
+        // plus any sonic-boom contribution — drives the plasma trail size.
+        const kickRamp = Math.max(0, 1 - (BURST_FRAMES - r.burstTimer) / 40); // 1→0
+        const boost = r.burstTimer > 0
+          ? Math.min(1, 0.85 + kickRamp * 0.4)
+          : Math.max(0, r.boomTimer / 22);
+        drawFlame(ctx, r.thrust, r.color, t, r.seed, boost);
+        drawShip(ctx, r.color, r.model, i, r.thrust, t, r.seed);
         ctx.restore();
-        out.push({ model: r.model, x: r.x, y, color: r.color, totalTokens: r.totalTokens, bursting: r.burstTimer > 0 });
+        out.push({
+          model: r.model, x: r.x, y, color: r.color, totalTokens: r.totalTokens,
+          bursting: r.burstTimer > 0 || r.boomTimer > 0,
+          trend: r.trend || "same",
+        });
       });
       if (sparks.length > 1400) sparks = sparks.slice(-1400);
       return out;
@@ -917,13 +1191,44 @@ function createRockets() {
 function fmt(v: number): string {
   return v >= 1_000_000 ? `${(v / 1_000_000).toFixed(2)}M`
     : v >= 1_000 ? `${(v / 1_000).toFixed(1)}K`
-    : `${v}`;
+    : `${Math.round(v)}`;
+}
+
+// Smoothly counts the displayed token value up (or down) toward `value`,
+// easing over ~900ms — mirrors the dashboard StatCard count-up so a token
+// gain on a poll reads as the car "earning" tokens rather than snapping.
+function CountUp({ value, className, style }: { value: number; className?: string; style?: React.CSSProperties }) {
+  const [display, setDisplay] = React.useState(value);
+  const fromRef = useRef(value);
+  const rafRef = useRef(0);
+  useEffect(() => {
+    const from = fromRef.current;
+    const to = value;
+    if (from === to) return;
+    let start: number | null = null;
+    const dur = 900;
+    const tick = (ts: number) => {
+      if (start === null) start = ts;
+      const p = Math.min((ts - start) / dur, 1);
+      const eased = 1 - Math.pow(1 - p, 3);
+      const v = from + (to - from) * eased;
+      fromRef.current = v;
+      setDisplay(v);
+      if (p < 1) rafRef.current = requestAnimationFrame(tick);
+      else { fromRef.current = to; setDisplay(to); }
+    };
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [value]);
+  return <span className={className} style={style}>{fmt(display)}</span>;
 }
 
 export default function ModelRace({ data, onExit }: ModelRaceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const labelRefs = useRef<(HTMLDivElement | null)[]>([]);
   const burstRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const gainRefs = useRef<(HTMLSpanElement | null)[]>([]);
 
   // Engine refs — created once on mount, never recreated
   const galaxyRef = useRef<ReturnType<typeof createGalaxy> | null>(null);
@@ -932,11 +1237,34 @@ export default function ModelRace({ data, onExit }: ModelRaceProps) {
   // Stable slot list for labels: computed from data, color fixed by model name hash
   // so colour never changes across data updates
   const topModels = useMemo(() => {
-    return [...data]
+    const ranked = [...data]
       .filter((m) => m.totalTokens > 0)
       .sort((a, b) => b.totalTokens - a.totalTokens)
-      .slice(0, 7)
-      .map((m, i) => ({ ...m, color: COLORS[i % COLORS.length] }));
+      .slice(0, 7);
+    const maxTok = Math.max(1, ...ranked.map((m) => m.totalTokens));
+
+    // Group by platform so each model gets a variant within its brand family.
+    const groups = new Map<string, RaceModelStat[]>();
+    for (const m of ranked) {
+      const key = platformKey(m.source, m.model);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(m);
+    }
+    // Within a platform, the higher-token model takes the most vivid variant.
+    const variantOf = new Map<string, { variant: number; count: number }>();
+    for (const [key, list] of groups) {
+      list.sort((a, b) => b.totalTokens - a.totalTokens);
+      list.forEach((m, vi) => variantOf.set(`${key}::${m.model}`, { variant: vi, count: list.length }));
+    }
+
+    return ranked.map((m) => {
+      const key = platformKey(m.source, m.model);
+      const v = variantOf.get(`${key}::${m.model}`) ?? { variant: 0, count: 1 };
+      // intensity: token weight relative to the table leader (0..1)
+      const intensity = m.totalTokens / maxTok;
+      const color = platformColor(key, v.variant, v.count, intensity);
+      return { ...m, color, intensity, platform: key };
+    });
   }, [data]);
 
   // Keep a ref of latest topModels so the render loop can read without
@@ -998,13 +1326,34 @@ export default function ModelRace({ data, onExit }: ModelRaceProps) {
       const ships = engine.frame(ctx, t);
       galaxy.drawFront(ctx);
       ships.forEach((s: any, i: number) => {
-        const tx = `translate3d(${s.x + 96}px, ${s.y}px, 0) translateY(-50%)`;
+        const tx = `translate3d(${s.x + 52}px, ${s.y}px, 0) translateY(-50%)`;
         const el = labelRefs.current[i];
         if (el) el.style.transform = tx;
         const bl = burstRefs.current[i];
         if (bl) {
           bl.style.transform = tx;
           bl.style.opacity = s.bursting ? "1" : "0";
+        }
+        // Rank-trend indicator: ▲ green = overtook, ▼ red = overtaken, ▬ = steady
+        const gn = gainRefs.current[i];
+        if (gn && gn.dataset.trend !== s.trend) {
+          gn.dataset.trend = s.trend;
+          if (s.trend === "up") {
+            gn.textContent = "▲";
+            gn.style.color = "#34ff8a";
+            gn.style.textShadow = "0 0 10px #34ff8a";
+            gn.style.animationPlayState = "running";
+          } else if (s.trend === "down") {
+            gn.textContent = "▼";
+            gn.style.color = "#ff4d6d";
+            gn.style.textShadow = "0 0 10px #ff4d6d";
+            gn.style.animationPlayState = "running";
+          } else {
+            gn.textContent = "▬";
+            gn.style.color = "rgba(255,255,255,0.35)";
+            gn.style.textShadow = "none";
+            gn.style.animationPlayState = "paused";
+          }
         }
       });
       raf = requestAnimationFrame(render);
@@ -1038,29 +1387,64 @@ export default function ModelRace({ data, onExit }: ModelRaceProps) {
                 transform: "translate3d(-400px,-400px,0) translateY(-50%)",
               }}
             />
-            {/* Label card */}
+            {/* Label card — cyber glassmorphism HUD */}
             <div
               ref={(el) => { labelRefs.current[i] = el; }}
-              className="absolute top-0 left-0 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10 whitespace-nowrap will-change-transform"
+              className="absolute top-0 left-0 flex items-stretch whitespace-nowrap will-change-transform overflow-hidden"
               style={{
-                background: `linear-gradient(135deg, ${m.color}26, ${m.color}0d)`,
-                boxShadow: `0 0 18px ${m.color}33, inset 0 1px 0 rgba(255,255,255,0.08)`,
-                backdropFilter: "blur(8px)",
+                background: `linear-gradient(135deg, ${m.color}2e, rgba(8,10,20,0.55) 60%)`,
+                border: `1px solid ${m.color}55`,
+                boxShadow: `0 0 22px ${m.color}40, inset 0 1px 0 rgba(255,255,255,0.10)`,
+                backdropFilter: "blur(10px)",
+                clipPath: "polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px))",
                 transform: "translate3d(-400px,-400px,0) translateY(-50%)",
               }}
             >
-              <span className="text-[11px] font-black text-white/40 w-4 text-center">#{i + 1}</span>
-              <div className="flex flex-col leading-none">
-                <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-white/55">
+              {/* Rank badge — angular cyber chip */}
+              <div
+                className="relative flex items-center justify-center px-2.5 font-black tabular-nums"
+                style={{
+                  background: `linear-gradient(160deg, ${m.color}, ${m.color}99)`,
+                  clipPath: "polygon(0 0, 100% 0, calc(100% - 7px) 100%, 0 100%)",
+                  color: "#05060c",
+                  textShadow: "0 0 6px rgba(255,255,255,0.5)",
+                }}
+              >
+                <span className="text-[9px] opacity-70 mr-px">#</span>
+                <span className="text-[15px] leading-none">{i + 1}</span>
+              </div>
+
+              {/* Model name + tokens */}
+              <div className="flex flex-col justify-center leading-none pl-2.5 pr-3.5 py-1.5">
+                <span
+                  className="race-glitch text-[8.5px] font-bold uppercase tracking-[0.2em] text-white/70"
+                  style={{ animationDelay: `${i * 0.7}s` }}
+                >
                   {m.model}
                 </span>
-                <span
-                  className="text-[17px] font-black tabular-nums"
-                  style={{ color: m.color, textShadow: `0 0 12px ${m.color}99` }}
-                >
-                  {fmt(m.totalTokens)}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <CountUp
+                    value={m.totalTokens}
+                    className="text-[18px] font-black tabular-nums"
+                    style={{ color: m.color, textShadow: `0 0 14px ${m.color}cc` }}
+                  />
+                  {/* Rank-trend arrow: ▲ green overtook · ▼ red overtaken · ▬ steady */}
+                  <span
+                    ref={(el) => { gainRefs.current[i] = el; }}
+                    data-trend="same"
+                    className="race-gain text-[11px] font-black leading-none"
+                    style={{ color: "rgba(255,255,255,0.35)", animationPlayState: "paused" }}
+                  >
+                    ▬
+                  </span>
+                </div>
               </div>
+
+              {/* Right accent bar */}
+              <span
+                className="absolute right-0 top-0 h-full w-0.5"
+                style={{ background: m.color, boxShadow: `0 0 8px ${m.color}` }}
+              />
             </div>
           </div>
         ))}
