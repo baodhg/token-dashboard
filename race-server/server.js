@@ -86,15 +86,14 @@ function broadcast() {
 }
 
 async function snapshotPlayers() {
-  if (players.size === 0) return;
-  const now = Date.now();
-  const active = [...players.values()].filter((p) => now - p.updatedAt <= TIMEOUT_MS);
-  if (!active.length) return;
+  if (dbSnapshot.size === 0) return;
+  // Snapshot everyone in dbSnapshot — includes players reported via /report
+  // even if they are no longer connected via WebSocket.
+  const active = [...dbSnapshot.values()];
   const values = active.flatMap((p) => [p.name, p.totalTokens]);
   const placeholders = active.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(", ");
   try {
     await db.query(`INSERT INTO race_snapshots (player_name, total_tokens) VALUES ${placeholders}`, values);
-    await loadDbSnapshot(); // keep in-memory cache fresh after writing
   } catch (e) { console.error("[db] snapshot error", e.message); }
 }
 
