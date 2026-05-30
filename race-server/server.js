@@ -132,7 +132,7 @@ const httpServer = createServer(async (req, res) => {
 
   // ── Health ────────────────────────────────────────────────────────────────
   if (urlPath === "/health" && req.method === "GET") {
-    return json(res, 200, { status: "ok", players: players.size });
+    return json(res, 200, { status: "ok", players: players.size, tracked: dbSnapshot.size });
   }
 
   if (urlPath === "/report" && req.method === "POST") {
@@ -151,7 +151,12 @@ const httpServer = createServer(async (req, res) => {
       totalTokens: Math.floor(totalTokens),
       updatedAt: Date.now(),
     });
-    await snapshotPlayers(); // writes to DB + refreshes dbSnapshot
+    // Update dbSnapshot in-memory immediately so broadcast reflects new value
+    dbSnapshot.set(payload.name, {
+      name: payload.name,
+      totalTokens: Math.floor(totalTokens),
+      updatedAt: Date.now(),
+    });
     broadcast();
     return json(res, 200, { ok: true, name: payload.name, totalTokens });
   }
