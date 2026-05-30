@@ -110,6 +110,28 @@ const httpServer = createServer(async (req, res) => {
     return json(res, 200, { status: "ok", players: players.size });
   }
 
+  if (urlPath === "/report" && req.method === "POST") {
+    const { token, totalTokens } = await readBody(req);
+    let payload;
+    try { payload = jwt.verify(token, JWT_SECRET); } catch {
+      return json(res, 401, { error: "Invalid token" });
+    }
+    if (typeof totalTokens !== "number" || !isFinite(totalTokens) || totalTokens < 0) {
+      return json(res, 400, { error: "Invalid totalTokens" });
+    }
+    // Find existing socket entry for this player name, or use a synthetic key
+    const syntheticKey = "__server__" + payload.name;
+    players.set(syntheticKey, {
+      name: payload.name,
+      totalTokens: Math.floor(totalTokens),
+      updatedAt: Date.now(),
+    });
+    broadcast();
+    // Also snapshot immediately so DB reflects the latest value
+    await snapshotPlayers();
+    return json(res, 200, { ok: true, name: payload.name, totalTokens });
+  }
+
   // ── Auth: login / register ────────────────────────────────────────────────
   if (urlPath === "/auth/login" && req.method === "POST") {
     const { name, password } = await readBody(req);

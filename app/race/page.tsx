@@ -370,16 +370,9 @@ function RaceContent() {
     setAuthReady(true);
   }, []);
 
-  const buildQs = useCallback((p: Period) => {
-    const qs = new URLSearchParams({ period: p });
-    if (source !== "all") qs.set("source", source);
-    return qs.toString();
-  }, [source]);
-
-  // Race score comes directly from /api/sync response — which queries the DB
-  // immediately after writing new calls. This is the only stable, authoritative
-  // all-time total. Never use token-stats (period-dependent, can spike).
-  const pollTick = useCallback(() => {
+  // Fetch my current total once on mount / period change — just for the UI badge.
+  // The actual race reporting is done server-side by /api/sync → POST /report.
+  useEffect(() => {
     fetch("/api/sync", { method: "POST" })
       .then((r) => r.json())
       .then((d) => {
@@ -389,20 +382,11 @@ function RaceContent() {
         }
       })
       .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    // Initial load — sync once immediately to get current totalTokens
-    pollTick();
     const params = new URLSearchParams({ period });
     if (source !== "all") params.set("source", source);
     router.replace(`/race?${params.toString()}`, { scroll: false });
-  }, [period, source, pollTick, router]);
-
-  useEffect(() => {
-    const id = setInterval(() => pollTick(), POLL_MS);
-    return () => clearInterval(id);
-  }, [period, pollTick]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleExit = useCallback(() => {
     const params = new URLSearchParams({ period });
@@ -682,6 +666,30 @@ function HistoryPanel({ serverUrl, myName }: { serverUrl: string; myName: string
   );
 }
 
+// ── Token copy button — shows JWT for pasting into RACE_PLAYER_TOKEN in .env ──
+function TokenCopyBtn({ token }: { token: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(token).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    <button
+      onClick={copy}
+      title="Copy RACE_PLAYER_TOKEN for .env"
+      style={{
+        fontFamily: "ui-monospace, monospace", fontSize: 9, fontWeight: 700,
+        background: copied ? "rgba(0,255,200,0.15)" : "none",
+        border: copied ? "1px solid rgba(0,255,200,0.3)" : "1px solid rgba(255,255,255,0.06)",
+        color: copied ? "#4affe0" : "rgba(255,255,255,0.2)",
+        borderRadius: 10, padding: "2px 8px", cursor: "pointer", transition: "all 0.2s",
+      }}
+    >{copied ? "✓ copied" : "copy token"}</button>
+  );
+}
+
 // ── Race shell with tab switcher ──────────────────────────────────────────────
 type Tab = "live" | "leaderboard" | "history";
 
@@ -745,6 +753,7 @@ function RaceShell({ session, serverUrl, period, setPeriod, myTokens, lastRefres
         )}
         <span style={{ width: 1, height: 14, background: "rgba(255,255,255,0.1)" }} />
         <button onClick={handleLogout} style={{ ...mono, fontSize: 9, color: "rgba(255,255,255,0.2)", background: "none", border: "none", cursor: "pointer", padding: "0 4px" }}>logout</button>
+        <TokenCopyBtn token={session.token} />
       </div>
 
       {/* Back button */}
