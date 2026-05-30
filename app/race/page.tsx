@@ -379,14 +379,16 @@ function RaceContent() {
   const fetchMyTokens = useCallback((p: Period) => {
     fetch(`/api/token-stats?${buildQs(p)}`)
       .then((r) => r.json())
-      .then((d) => { setMyTokens(d?.summary?.totalTokens ?? 0); setLastRefresh(Date.now()); })
+      .then((d) => { setMyTokens(d?.summary?.total ?? 0); setLastRefresh(Date.now()); })
       .catch(() => {});
   }, [buildQs]);
 
   const pollTick = useCallback((p: Period) => {
     fetch("/api/sync", { method: "POST" })
       .then((r) => r.json())
-      .then((res) => { if (res?.synced > 0) fetchMyTokens(p); })
+      // Always refresh stats on every poll tick — don't wait for synced > 0.
+      // This ensures myTokens stays current and gets reported to the race server.
+      .then(() => fetchMyTokens(p))
       .catch(() => {});
   }, [fetchMyTokens]);
 

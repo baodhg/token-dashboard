@@ -28,15 +28,15 @@ function ThemeCard({ theme, selected, onSelect }: { theme: Theme; selected: bool
     >
       {/* Card preview */}
       <div
-        className={`relative w-full aspect-[4/3] rounded-2xl overflow-hidden border-2 transition-all ${
+        className={`relative w-full aspect-4/3 rounded-2xl overflow-hidden border-2 transition-all ${
           selected
             ? "border-[#1c1c1e] shadow-[0_0_0_4px_rgba(28,28,30,0.08)]"
-            : "border-black/[0.08] hover:border-black/[0.18]"
+            : "border-black/8 hover:border-black/18"
         }`}
       >
         {theme === "light" && (
           <div className="w-full h-full bg-[#f2f2f7] flex items-center justify-center">
-            <div className="bg-white rounded-xl px-4 py-2.5 shadow-sm border border-black/[0.06]">
+            <div className="bg-white rounded-xl px-4 py-2.5 shadow-sm border border-black/6">
               <span className="text-[22px] font-semibold text-[#1c1c1e]">Aa</span>
             </div>
           </div>
@@ -44,7 +44,7 @@ function ThemeCard({ theme, selected, onSelect }: { theme: Theme; selected: bool
 
         {theme === "dark" && (
           <div className="w-full h-full bg-[#1c1c1e] flex items-center justify-center">
-            <div className="bg-[#2c2c2e] rounded-xl px-4 py-2.5 border border-white/[0.08]">
+            <div className="bg-[#2c2c2e] rounded-xl px-4 py-2.5 border border-white/8">
               <span className="text-[22px] font-semibold text-white">Aa</span>
             </div>
           </div>
@@ -54,13 +54,13 @@ function ThemeCard({ theme, selected, onSelect }: { theme: Theme; selected: bool
           <div className="w-full h-full flex overflow-hidden">
             {/* Left half – light */}
             <div className="w-1/2 h-full bg-[#f2f2f7] flex items-center justify-end pr-1">
-              <div className="bg-white rounded-l-xl pl-3 pr-1 py-2.5 shadow-sm border-l border-y border-black/[0.06]">
+              <div className="bg-white rounded-l-xl pl-3 pr-1 py-2.5 shadow-sm border-l border-y border-black/6">
                 <span className="text-[20px] font-semibold text-[#1c1c1e]">Aa</span>
               </div>
             </div>
             {/* Right half – dark */}
             <div className="w-1/2 h-full bg-[#1c1c1e] flex items-center justify-start pl-1">
-              <div className="bg-[#2c2c2e] rounded-r-xl pr-3 pl-1 py-2.5 border-r border-y border-white/[0.08]">
+              <div className="bg-[#2c2c2e] rounded-r-xl pr-3 pl-1 py-2.5 border-r border-y border-white/8">
                 <span className="text-[20px] font-semibold text-white">Aa</span>
               </div>
             </div>
@@ -92,7 +92,7 @@ export default function SettingsPage() {
       <div className="w-full max-w-sm bg-white rounded-[28px] overflow-hidden shadow-[0_8px_40px_rgba(0,0,0,0.10)]">
 
         {/* Header */}
-        <div className="relative flex items-center justify-center h-14 px-4 border-b border-black/[0.06]">
+        <div className="relative flex items-center justify-center h-14 px-4 border-b border-black/6">
           <Link
             href="/"
             className="absolute left-4 w-8 h-8 rounded-full bg-[#f2f2f7] hover:bg-[#e5e5ea] flex items-center justify-center transition-colors"
@@ -121,7 +121,7 @@ export default function SettingsPage() {
           </section>
 
           {/* Divider */}
-          <div className="h-px bg-black/[0.06]" />
+          <div className="h-px bg-black/6" />
 
           {/* LANGUAGE */}
           <section>
@@ -158,7 +158,7 @@ export default function SettingsPage() {
           </section>
 
           {/* Divider */}
-          <div className="h-px bg-black/[0.06]" />
+          <div className="h-px bg-black/6" />
 
           {/* MORE OPTIONS */}
           <section>
