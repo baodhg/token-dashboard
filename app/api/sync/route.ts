@@ -9,6 +9,30 @@ import { syncAntigravity } from "@/lib/sync/antigravity";
 import { prisma          } from "@/lib/db";
 import { reportToRace   } from "@/lib/race-reporter";
 
+// Period window boundaries — mirrors the logic in token-stats/route.ts
+function periodWindow(period: string): { since: Date; to: Date } {
+  const now = Date.now();
+  const to = new Date(now);
+
+  if (period === "all") return { since: new Date(0), to };
+
+  // 1d = today from midnight, others = rolling window
+  const MS: Record<string, number> = {
+    "1d":  86_400_000,
+    "3d":  3  * 86_400_000,
+    "1w":  7  * 86_400_000,
+    "1m":  30 * 86_400_000,
+  };
+
+  if (period === "1d") {
+    const since = new Date(now);
+    since.setHours(0, 0, 0, 0);
+    return { since, to };
+  }
+
+  return { since: new Date(now - (MS[period] ?? MS["1d"])), to };
+}
+
 export async function POST() {
   const [claude, cline, codex, gemini, copilot, cursor, antigravity] = await Promise.allSettled([
     syncClaudeCode(),
@@ -23,29 +47,32 @@ export async function POST() {
   const get = (r: PromiseSettledResult<{ synced: number }>) =>
     r.status === "fulfilled" ? r.value.synced : 0;
 
-  // Query all-time total directly from calls table — single source of truth.
+  // Race period from env (default 1d) — all players must use the same window
+  const racePeriod = process.env.RACE_PERIOD || "1d";
+  const { since, to } = periodWindow(racePeriod);
+
   const agg = await prisma.call.aggregate({
     _sum: { inputTokens: true, cacheCreationTokens: true, outputTokens: true },
+    where: { timestamp: { gte: since, lte: to } },
   });
   const totalTokens =
     (agg._sum.inputTokens ?? 0) +
     (agg._sum.cacheCreationTokens ?? 0) +
     (agg._sum.outputTokens ?? 0);
 
-  // Fire-and-forget — auto-logins with RACE_PLAYER_NAME+PASSWORD from .env,
-  // caches JWT, retries once on 401. Never blocks the sync response.
-  reportToRace(totalTokens).catch(() => {});
+  // Fire-and-forget push to race server
+  reportToRace(totalTokens, racePeriod).catch(() => {});
 
   return Response.json({
-    synced:     get(claude) + get(cline) + get(codex) + get(gemini) + get(copilot) + get(cursor) + get(antigravity),
-    claude:     get(claude),
-    cline:      get(cline),
-    codex:      get(codex),
-    gemini:     get(gemini),
-    copilot:    get(copilot),
-    cursor:     get(cursor),
+    synced:      get(claude) + get(cline) + get(codex) + get(gemini) + get(copilot) + get(cursor) + get(antigravity),
+    claude:      get(claude),
+    cline:       get(cline),
+    codex:       get(codex),
+    gemini:      get(gemini),
+    copilot:     get(copilot),
+    cursor:      get(cursor),
     antigravity: get(antigravity),
     totalTokens,
+    racePeriod,
   });
 }
-

@@ -2,12 +2,15 @@
 // Auto-logins with RACE_PLAYER_NAME + RACE_PLAYER_PASSWORD, caches the JWT,
 // and re-authenticates transparently when the token expires or is rejected.
 
-const RACE_SERVER_URL   = process.env.NEXT_PUBLIC_RACE_SERVER_URL || "";
-const RACE_PLAYER_NAME  = process.env.RACE_PLAYER_NAME  || "";
-const RACE_PLAYER_PASS  = process.env.RACE_PLAYER_PASSWORD || "";
+const RACE_SERVER_URL  = process.env.NEXT_PUBLIC_RACE_SERVER_URL || "";
+const RACE_PLAYER_NAME = process.env.RACE_PLAYER_NAME  || "";
+const RACE_PLAYER_PASS = process.env.RACE_PLAYER_PASSWORD || "";
+
+// Default race period — players compete within the same window
+const RACE_PERIOD = (process.env.RACE_PERIOD || "1d") as string;
 
 let cachedToken: string | null = null;
-let tokenExpiresAt = 0; // Unix ms
+let tokenExpiresAt = 0;
 
 async function login(): Promise<string | null> {
   if (!RACE_SERVER_URL || !RACE_PLAYER_NAME || !RACE_PLAYER_PASS) return null;
@@ -17,19 +20,13 @@ async function login(): Promise<string | null> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: RACE_PLAYER_NAME, password: RACE_PLAYER_PASS }),
     });
-    if (!res.ok) {
-      console.warn(`[race] login failed: ${res.status}`);
-      return null;
-    }
+    if (!res.ok) { console.warn(`[race] login failed: ${res.status}`); return null; }
     const data = await res.json();
     cachedToken = data.token;
-    // JWT expires in 7d — refresh 1h before expiry to be safe
-    tokenExpiresAt = Date.now() + 6 * 24 * 60 * 60 * 1000;
-    console.log(`[race] logged in as "${data.displayName}"`);
+    tokenExpiresAt = Date.now() + 6 * 24 * 60 * 60 * 1000; // refresh before 7d expiry
+    console.log(`[race] logged in as "${data.displayName}" (period: ${RACE_PERIOD})`);
     return cachedToken;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 async function getToken(): Promise<string | null> {
@@ -37,29 +34,26 @@ async function getToken(): Promise<string | null> {
   return login();
 }
 
-export async function reportToRace(totalTokens: number): Promise<void> {
+export async function reportToRace(totalTokens: number, period = RACE_PERIOD): Promise<void> {
   if (!RACE_SERVER_URL || !RACE_PLAYER_NAME || !RACE_PLAYER_PASS) return;
 
   const token = await getToken();
   if (!token) return;
 
-  const doReport = async (t: string) =>
+  const doReport = (t: string) =>
     fetch(`${RACE_SERVER_URL}/report`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: t, totalTokens }),
+      body: JSON.stringify({ token: t, totalTokens, period }),
     });
 
   let res = await doReport(token);
 
-  // Token rejected (expired / server restarted) — re-login once and retry
   if (res.status === 401) {
     cachedToken = null;
     const fresh = await login();
     if (fresh) res = await doReport(fresh);
   }
 
-  if (!res.ok) {
-    console.warn(`[race] report failed: ${res.status}`);
-  }
+  if (!res.ok) console.warn(`[race] report failed: ${res.status}`);
 }
