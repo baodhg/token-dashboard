@@ -14,6 +14,8 @@ export interface PlayerStat {
 interface MultiplayerRaceProps {
   serverUrl: string;
   playerName: string;
+  /** JWT token from auth — sent with every player_update to prove identity. */
+  playerToken: string;
   /** Current player's totalTokens — caller keeps fetching and passes it in. */
   myTokens: number;
   onExit?: () => void;
@@ -493,7 +495,7 @@ function CountUp({ value, className, style }: { value: number; className?: strin
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExit }: MultiplayerRaceProps) {
+export default function MultiplayerRace({ serverUrl, playerName, playerToken, myTokens, onExit }: MultiplayerRaceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const labelRefs = useRef<(HTMLDivElement | null)[]>([]);
   const galaxyRef = useRef<ReturnType<typeof createGalaxy> | null>(null);
@@ -539,14 +541,14 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
   useEffect(() => {
     const s = socketRef.current;
     if (!s || !connected) return;
-    s.emit("player_update", { name: playerName, totalTokens: myTokens });
+    s.emit("player_update", { token: playerToken, totalTokens: myTokens });
   }, [myTokens, playerName, connected]);
 
   useEffect(() => {
     const s = socketRef.current;
     if (!s || !connected) return;
     const id = setInterval(() => {
-      s.emit("player_update", { name: playerName, totalTokens: myTokens });
+      s.emit("player_update", { token: playerToken, totalTokens: myTokens });
     }, 10_000);
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
