@@ -50,12 +50,36 @@ async function initDb() {
 const players = new Map(); // socketId → { name, totalTokens, updatedAt }
 const TIMEOUT_MS = 45_000;
 
+// Latest snapshot per player from DB — loaded on startup + refreshed after each snapshot
+let dbSnapshot = new Map(); // name → { name, totalTokens, updatedAt }
+
+async function loadDbSnapshot() {
+  try {
+    const { rows } = await db.query(`
+      SELECT DISTINCT ON (player_name)
+        player_name AS name, total_tokens AS "totalTokens", recorded_at AS "updatedAt"
+      FROM race_snapshots
+      ORDER BY player_name, recorded_at DESC
+    `);
+    dbSnapshot = new Map(rows.map(r => [r.name, {
+      name: r.name,
+      totalTokens: Number(r.totalTokens),
+      updatedAt: new Date(r.updatedAt).getTime(),
+    }]));
+  } catch (e) { console.error("[db] loadDbSnapshot error", e.message); }
+}
+
 function broadcast() {
   const now = Date.now();
   for (const [id, p] of players) {
     if (now - p.updatedAt > TIMEOUT_MS) players.delete(id);
   }
-  const list = [...players.values()].map((p) => ({
+  // Merge: in-memory (realtime) takes priority over DB snapshot (offline players)
+  const merged = new Map(dbSnapshot);
+  for (const p of players.values()) {
+    merged.set(p.name, p); // online player overrides DB value
+  }
+  const list = [...merged.values()].map((p) => ({
     name: p.name, totalTokens: p.totalTokens, updatedAt: p.updatedAt,
   }));
   io.emit("players_update", list);
@@ -70,6 +94,7 @@ async function snapshotPlayers() {
   const placeholders = active.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(", ");
   try {
     await db.query(`INSERT INTO race_snapshots (player_name, total_tokens) VALUES ${placeholders}`, values);
+    await loadDbSnapshot(); // keep in-memory cache fresh after writing
   } catch (e) { console.error("[db] snapshot error", e.message); }
 }
 
@@ -126,9 +151,8 @@ const httpServer = createServer(async (req, res) => {
       totalTokens: Math.floor(totalTokens),
       updatedAt: Date.now(),
     });
+    await snapshotPlayers(); // writes to DB + refreshes dbSnapshot
     broadcast();
-    // Also snapshot immediately so DB reflects the latest value
-    await snapshotPlayers();
     return json(res, 200, { ok: true, name: payload.name, totalTokens });
   }
 
@@ -277,6 +301,13 @@ const io = new Server(httpServer, {
 io.on("connection", (socket) => {
   console.log(`[connect] ${socket.id}`);
 
+  // Send current state immediately on connect — includes offline players from DB
+  const merged = new Map(dbSnapshot);
+  for (const p of players.values()) merged.set(p.name, p);
+  socket.emit("players_update", [...merged.values()].map(p => ({
+    name: p.name, totalTokens: p.totalTokens, updatedAt: p.updatedAt,
+  })));
+
   socket.on("player_update", ({ token, totalTokens }) => {
     let payload;
     try { payload = jwt.verify(token, JWT_SECRET); } catch { return; }
@@ -299,7 +330,9 @@ setInterval(broadcast, 15_000);
 setInterval(snapshotPlayers, SNAPSHOT_INTERVAL_MS);
 
 // ── Start ─────────────────────────────────────────────────────────────────────
-initDb().then(() => {
+initDb().then(async () => {
+  await loadDbSnapshot();
+  console.log(`[db] loaded ${dbSnapshot.size} player snapshots`);
   httpServer.listen(PORT, () => {
     console.log(`Race server :${PORT} | Admin key: ${ADMIN_KEY}`);
     if (JWT_SECRET.startsWith("change-me-in-production-")) {
