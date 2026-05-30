@@ -804,10 +804,11 @@ function createGalaxy() {
 // ════════════════════════════════════════════════════════════════════════════
 //  ROCKETS ENGINE
 // ════════════════════════════════════════════════════════════════════════════
-// Burst sustains ~11s @60fps — slightly longer than the 10s poll, so back-to-back
-// token gains chain seamlessly with no plasma gap. Gain pulse (green flash + ↑)
-// runs ~1.8s.
-const BURST_FRAMES = 660;
+// Burst "body" holds full burn ~2.5s; after it ends the eased `burn` value
+// fades the afterburner down over a further ~1.5s (see frame()). A token gain
+// on any poll refills the body, so continuous gains chain with no gap, and the
+// wind-down is always a smooth throttle-down rather than a hard cut.
+const BURST_FRAMES = 150;
 
 function createRockets() {
   let W = 0, H = 0, destX = 0;
@@ -1050,6 +1051,7 @@ function createRockets() {
           x: old ? old.x : 70, y: old ? old.y : 0,
           seed: old ? old.seed : rnd(0, 1000),
           thrust: old ? old.thrust : 0,
+          burn: old ? (old.burn || 0) : 0,        // eased afterburner level 0..1
           bob: old ? old.bob : rnd(0, TAU),
           burstTimer,
           burstStart: grew,                     // fired a fresh shockwave this update
@@ -1086,41 +1088,25 @@ function createRockets() {
         r.x += (target - r.x) * lerpRate;
         const pixelSpeed = Math.min(1, Math.abs(r.x - prevX) / 2.2);
 
-        // Burst countdown — decay toward 0
+        // Burst countdown.
         if (r.burstTimer > 0) r.burstTimer--;
 
-        // Continuous burst intensity (1 during the body, easing to 0 across the
-        // taper) — used to fade ALL burst-driven emitters smoothly. Computed
-        // before the thrust profile so spark/warp density tracks the wind-down
-        // instead of cutting out the instant burstTimer hits 0.
-        const TAPER_F = 150;
-        const burstIntensity = r.burstTimer <= 0
-          ? 0
-          : r.burstTimer >= TAPER_F
-            ? 1
-            : (() => { const tap = r.burstTimer / TAPER_F; return tap * tap * (3 - 2 * tap); })();
-
-        // Burst thrust profile, three phases for an organic afterburner feel:
-        //  1) KICK   — first ~40 frames ramp 0.85 → 1.0 (hard shove forward)
-        //  2) CRUISE — sustained HIGH plasma (~0.85) for the body of the burst
-        //  3) TAPER  — last ~150 frames ease 0.85 → idle so it doesn't cut out
-        //              abruptly; like throttling down instead of killing the engine.
-        const cruise = 0.35 + pixelSpeed * 0.65;   // post-burst idle/cruise level
-        let thrustTarget;
+        // Afterburner level `r.burn` (0..1), advanced by a constant-speed ramp
+        // so the wind-down is a STRAIGHT LINE (even rate), never an exponential
+        // collapse and never a snap. While bursting it ramps up fast to 1; once
+        // the burst ends it ramps DOWN by a tiny fixed step each frame, taking
+        // ~6s to reach zero at a perfectly steady pace.
         if (r.burstTimer > 0) {
-          const kickRamp = (BURST_FRAMES - r.burstTimer) / 40; // 0→1 first 40f
-          if (kickRamp < 1) {
-            thrustTarget = 0.85 + kickRamp * 0.15;                  // 0.85 → 1.0
-          } else {
-            // body holds 0.85; taper eases 0.85 → cruise via burstIntensity
-            thrustTarget = cruise + (0.85 - cruise) * burstIntensity;
-          }
+          r.burn = Math.min(1, r.burn + 0.06);     // ramp up ~17 frames
         } else {
-          thrustTarget = cruise;
+          r.burn = Math.max(0, r.burn - 1 / 360);  // ramp down evenly over ~6s
         }
-        // Slower follow during taper so the wind-down reads as gradual.
-        const follow = (r.burstTimer > 0 && r.burstTimer < TAPER_F) ? 0.05 : 0.1;
-        r.thrust += (thrustTarget - r.thrust) * follow;
+        const burstIntensity = r.burn;             // continuous, never snaps
+
+        // Thrust follows burn directly (burn is already eased) so there's no
+        // second lag stage that could overshoot or stall.
+        const cruise = 0.35 + pixelSpeed * 0.65;   // idle/cruise level
+        r.thrust = cruise + (1.0 - cruise) * burstIntensity;
 
         r.bob += 0.05;
         const y = laneAt(i) + Math.sin(r.bob) * 2.4;
@@ -1190,13 +1176,10 @@ function createRockets() {
 
         ctx.save();
         ctx.translate(r.x, y);
-        // boost drives plasma trail size. Derive it from the (already taper-eased)
-        // thrust so the trail fattens with the kick and shrinks gradually during
-        // the wind-down — no hard cut. Map thrust 0.5→1.0 onto boost 0→1, plus a
-        // little kick spike at burst start and any sonic-boom contribution.
-        const kickSpike = Math.max(0, 1 - (BURST_FRAMES - r.burstTimer) / 40) * 0.35;
-        const fromThrust = Math.max(0, (r.thrust - 0.5) / 0.5);
-        const boost = Math.min(1, Math.max(fromThrust + kickSpike, r.boomTimer / 22));
+        // boost drives plasma trail size — taken directly from the eased burn
+        // level (plus any sonic-boom contribution), so the trail fattens on the
+        // kick and shrinks gradually through the wind-down with no hard cut.
+        const boost = Math.min(1, Math.max(burstIntensity, r.boomTimer / 22));
         drawFlame(ctx, r.thrust, r.color, t, r.seed, boost);
         drawShip(ctx, r.color, r.model, i, r.thrust, t, r.seed);
         ctx.restore();
