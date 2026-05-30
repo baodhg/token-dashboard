@@ -2,14 +2,11 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --omit=dev
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 COPY server.js ./
 
-EXPOSE 3001
-
-ENV PORT=3001
-ENV ALLOWED_ORIGINS=*
+EXPOSE 9876
 
 CMD ["node", "server.js"]
