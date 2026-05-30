@@ -7,9 +7,7 @@ import { syncCopilot     } from "@/lib/sync/copilot";
 import { syncCursor      } from "@/lib/sync/cursor";
 import { syncAntigravity } from "@/lib/sync/antigravity";
 import { prisma          } from "@/lib/db";
-
-const RACE_SERVER_URL  = process.env.NEXT_PUBLIC_RACE_SERVER_URL || "";
-const RACE_PLAYER_TOKEN = process.env.RACE_PLAYER_TOKEN || "";
+import { reportToRace   } from "@/lib/race-reporter";
 
 export async function POST() {
   const [claude, cline, codex, gemini, copilot, cursor, antigravity] = await Promise.allSettled([
@@ -34,15 +32,9 @@ export async function POST() {
     (agg._sum.cacheCreationTokens ?? 0) +
     (agg._sum.outputTokens ?? 0);
 
-  // Push to race server immediately after every sync — no WebSocket polling needed.
-  // Fire-and-forget: never block the sync response waiting for the race server.
-  if (RACE_SERVER_URL && RACE_PLAYER_TOKEN) {
-    fetch(`${RACE_SERVER_URL}/report`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: RACE_PLAYER_TOKEN, totalTokens }),
-    }).catch(() => {}); // silently ignore if race server is down
-  }
+  // Fire-and-forget — auto-logins with RACE_PLAYER_NAME+PASSWORD from .env,
+  // caches JWT, retries once on 401. Never blocks the sync response.
+  reportToRace(totalTokens).catch(() => {});
 
   return Response.json({
     synced:     get(claude) + get(cline) + get(codex) + get(gemini) + get(copilot) + get(cursor) + get(antigravity),
