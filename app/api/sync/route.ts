@@ -6,6 +6,7 @@ import { syncGemini      } from "@/lib/sync/gemini";
 import { syncCopilot     } from "@/lib/sync/copilot";
 import { syncCursor      } from "@/lib/sync/cursor";
 import { syncAntigravity } from "@/lib/sync/antigravity";
+import { prisma          } from "@/lib/db";
 
 export async function POST() {
   const [claude, cline, codex, gemini, copilot, cursor, antigravity] = await Promise.allSettled([
@@ -21,6 +22,16 @@ export async function POST() {
   const get = (r: PromiseSettledResult<{ synced: number }>) =>
     r.status === "fulfilled" ? r.value.synced : 0;
 
+  // After sync, query the real all-time total directly from calls table.
+  // This is the stable, authoritative number to report to the race server.
+  const agg = await prisma.call.aggregate({
+    _sum: { inputTokens: true, cacheCreationTokens: true, outputTokens: true },
+  });
+  const totalTokens =
+    (agg._sum.inputTokens ?? 0) +
+    (agg._sum.cacheCreationTokens ?? 0) +
+    (agg._sum.outputTokens ?? 0);
+
   return Response.json({
     synced:  get(claude) + get(cline) + get(codex) + get(gemini) + get(copilot) + get(cursor) + get(antigravity),
     claude:  get(claude),
@@ -30,6 +41,7 @@ export async function POST() {
     copilot: get(copilot),
     cursor:  get(cursor),
     antigravity: get(antigravity),
+    totalTokens,
   });
 }
 

@@ -376,33 +376,31 @@ function RaceContent() {
     return qs.toString();
   }, [source]);
 
-  const fetchMyTokens = useCallback((_p: Period) => {
-    // Always use all-time total for race score — independent of the UI period filter.
-    // Using the filtered period caused wildly different scores (e.g. ALL = 16M vs 1D = 594K).
-    fetch(`/api/token-stats?period=all`)
+  // Race score comes directly from /api/sync response — which queries the DB
+  // immediately after writing new calls. This is the only stable, authoritative
+  // all-time total. Never use token-stats (period-dependent, can spike).
+  const pollTick = useCallback(() => {
+    fetch("/api/sync", { method: "POST" })
       .then((r) => r.json())
-      .then((d) => { setMyTokens(d?.summary?.total ?? 0); setLastRefresh(Date.now()); })
+      .then((d) => {
+        if (typeof d?.totalTokens === "number") {
+          setMyTokens(d.totalTokens);
+          setLastRefresh(Date.now());
+        }
+      })
       .catch(() => {});
   }, []);
 
-  const pollTick = useCallback((p: Period) => {
-    fetch("/api/sync", { method: "POST" })
-      .then((r) => r.json())
-      // Always refresh stats on every poll tick — don't wait for synced > 0.
-      // This ensures myTokens stays current and gets reported to the race server.
-      .then(() => fetchMyTokens(p))
-      .catch(() => {});
-  }, [fetchMyTokens]);
-
   useEffect(() => {
-    fetchMyTokens(period);
+    // Initial load — sync once immediately to get current totalTokens
+    pollTick();
     const params = new URLSearchParams({ period });
     if (source !== "all") params.set("source", source);
     router.replace(`/race?${params.toString()}`, { scroll: false });
-  }, [period, source, fetchMyTokens, router]);
+  }, [period, source, pollTick, router]);
 
   useEffect(() => {
-    const id = setInterval(() => pollTick(period), POLL_MS);
+    const id = setInterval(() => pollTick(), POLL_MS);
     return () => clearInterval(id);
   }, [period, pollTick]);
 
