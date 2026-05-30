@@ -111,7 +111,7 @@ const httpServer = createServer(async (req, res) => {
 
   // ── Health ────────────────────────────────────────────────────────────────
   if (urlPath === "/health" && req.method === "GET") {
-    return json(res, 200, { status: "ok", players: players.size, tracked: dbSnapshot.size });
+    return json(res, 200, { status: "ok", tracked: dbSnapshot.size });
   }
 
   // ── Live: current player state for canvas polling (no WebSocket needed) ─────
