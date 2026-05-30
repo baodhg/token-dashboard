@@ -11,6 +11,9 @@ services:
       JWT_SECRET: "change-me-to-a-long-random-string"
       ADMIN_KEY: "change-me-admin-key"
       DATA_DIR: "/app/data"
+      # Same PostgreSQL as your dashboard — for leaderboard & history.
+      # If your DB is on the host machine, use host.docker.internal instead of localhost.
+      DATABASE_URL: "postgresql://postgres:password@host.docker.internal:5432/token_dashboard"
     volumes:
       # Persist users.json outside the container
       - ./data:/app/data

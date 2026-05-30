@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, Suspense, CSSProperties } from "react";
+import { useState, useEffect, useCallback, Suspense, CSSProperties, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PERIODS, type Period } from "@/lib/mock-data";
@@ -398,39 +398,330 @@ function RaceContent() {
     );
   }
 
-  // Race canvas
   return (
-    <div className="fixed inset-0 bg-[#03040a]">
-      {/* Period filter */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-80 flex items-center gap-1 px-2 py-1 rounded-full bg-black/40 border border-white/10 backdrop-blur-md">
-        {PERIODS.filter((p) => p.key !== "custom").map(({ key }) => (
+    <RaceShell
+      session={session}
+      serverUrl={RACE_SERVER_URL}
+      period={period}
+      setPeriod={setPeriod}
+      myTokens={myTokens}
+      lastRefresh={lastRefresh}
+      handleExit={handleExit}
+      handleLogout={handleLogout}
+    />
+  );
+}
+
+// ── Leaderboard panel ─────────────────────────────────────────────────────────
+interface LeaderRow { player_name: string; max_tokens: number; last_seen: string; }
+
+function LeaderboardPanel({ serverUrl }: { serverUrl: string }) {
+  const [rows, setRows] = useState<LeaderRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${serverUrl}/leaderboard`)
+      .then((r) => r.json())
+      .then((d) => { setRows(d.leaderboard || []); setLoading(false); })
+      .catch(() => { setError("Failed to load"); setLoading(false); });
+  }, [serverUrl]);
+
+  const maxTok = Math.max(1, ...rows.map((r) => Number(r.max_tokens)));
+
+  const mono: CSSProperties = { fontFamily: "ui-monospace, monospace" };
+  return (
+    <div style={{ padding: "1.5rem 1rem", maxWidth: 560, margin: "0 auto", width: "100%" }}>
+      <h2 style={{ ...mono, fontSize: 13, fontWeight: 900, letterSpacing: "0.2em", color: "rgba(0,240,200,0.7)", marginBottom: "1.2rem", textTransform: "uppercase" }}>
+        All-Time Leaderboard
+      </h2>
+      {loading && <p style={{ ...mono, fontSize: 11, color: "rgba(255,255,255,0.25)" }}>Loading…</p>}
+      {error && <p style={{ ...mono, fontSize: 11, color: "#ff6b8a" }}>{error}</p>}
+      {!loading && rows.length === 0 && !error && (
+        <p style={{ ...mono, fontSize: 11, color: "rgba(255,255,255,0.25)" }}>No data yet — snapshots are written every 60s.</p>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+        {rows.map((r, i) => {
+          const pct = (Number(r.max_tokens) / maxTok) * 100;
+          const hue = i === 0 ? 45 : i === 1 ? 200 : i === 2 ? 280 : 160;
+          const color = `hsl(${hue},80%,62%)`;
+          return (
+            <div key={r.player_name} style={{
+              position: "relative", overflow: "hidden",
+              background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 8, padding: "10px 14px",
+            }}>
+              {/* progress bar bg */}
+              <div style={{ position: "absolute", inset: 0, background: `linear-gradient(90deg, ${color}18 0%, transparent ${pct}%)`, pointerEvents: "none" }} />
+              <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ ...mono, fontSize: 11, fontWeight: 900, color, minWidth: 22, textAlign: "right" }}>#{i + 1}</span>
+                <span style={{ ...mono, fontSize: 13, fontWeight: 700, color: "#eafffb", flex: 1 }}>{r.player_name}</span>
+                <span style={{ ...mono, fontSize: 13, fontWeight: 800, color, fontVariantNumeric: "tabular-nums" }}>
+                  {Number(r.max_tokens) >= 1_000_000 ? `${(Number(r.max_tokens) / 1_000_000).toFixed(2)}M`
+                    : Number(r.max_tokens) >= 1_000 ? `${(Number(r.max_tokens) / 1_000).toFixed(1)}K`
+                    : String(r.max_tokens)}
+                </span>
+                <span style={{ ...mono, fontSize: 9, color: "rgba(255,255,255,0.2)", minWidth: 60, textAlign: "right" }}>
+                  {new Date(r.last_seen).toLocaleDateString()}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── History chart panel ───────────────────────────────────────────────────────
+interface HistoryRow { day: string; player_name: string; tokens: number; }
+
+function HistoryPanel({ serverUrl, myName }: { serverUrl: string; myName: string }) {
+  const [days, setDays] = useState(7);
+  const [data, setData] = useState<HistoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${serverUrl}/history/all?days=${days}`)
+      .then((r) => r.json())
+      .then((d) => { setData(d.history || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [serverUrl, days]);
+
+  // Draw chart
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !data.length) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const W = canvas.width, H = canvas.height;
+    const PAD = { top: 20, right: 20, bottom: 36, left: 58 };
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(255,255,255,0.03)";
+    ctx.fillRect(0, 0, W, H);
+
+    // Collect unique days + players
+    const daySet = new Set<string>();
+    const playerSet = new Set<string>();
+    data.forEach((r) => { daySet.add(r.day.slice(0, 10)); playerSet.add(r.player_name); });
+    const dayList = [...daySet].sort();
+    const playerList = [...playerSet];
+    if (!dayList.length) return;
+
+    // Map: player → day → tokens
+    const map = new Map<string, Map<string, number>>();
+    data.forEach((r) => {
+      if (!map.has(r.player_name)) map.set(r.player_name, new Map());
+      map.get(r.player_name)!.set(r.day.slice(0, 10), Number(r.tokens));
+    });
+
+    const maxTok = Math.max(1, ...data.map((r) => Number(r.tokens)));
+    const cW = W - PAD.left - PAD.right;
+    const cH = H - PAD.top - PAD.bottom;
+    const xAt = (i: number) => PAD.left + (i / Math.max(dayList.length - 1, 1)) * cW;
+    const yAt = (v: number) => PAD.top + cH - (v / maxTok) * cH;
+
+    // Grid lines
+    ctx.strokeStyle = "rgba(255,255,255,0.06)"; ctx.lineWidth = 1;
+    for (let t = 0; t <= 4; t++) {
+      const y = PAD.top + (t / 4) * cH;
+      ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.25)";
+      ctx.font = "9px ui-monospace, monospace"; ctx.textAlign = "right";
+      const v = maxTok * (1 - t / 4);
+      ctx.fillText(v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1_000 ? `${(v / 1_000).toFixed(0)}K` : `${Math.round(v)}`, PAD.left - 6, y + 3);
+    }
+
+    // Day labels
+    ctx.fillStyle = "rgba(255,255,255,0.2)";
+    ctx.font = "9px ui-monospace, monospace"; ctx.textAlign = "center";
+    dayList.forEach((d, i) => {
+      if (dayList.length > 10 && i % 2 !== 0) return;
+      ctx.fillText(d.slice(5), xAt(i), H - PAD.bottom + 14);
+    });
+
+    // Lines per player
+    const HUES = [160, 45, 280, 200, 20, 320, 90];
+    playerList.forEach((name, pi) => {
+      const hue = HUES[pi % HUES.length];
+      const isMe = name === myName;
+      const color = `hsl(${hue},${isMe ? 85 : 65}%,${isMe ? 62 : 52}%)`;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = isMe ? 2.5 : 1.5;
+      ctx.globalAlpha = isMe ? 1 : 0.65;
+      ctx.beginPath();
+      let started = false;
+      dayList.forEach((d, i) => {
+        const v = map.get(name)?.get(d) ?? null;
+        if (v === null) { started = false; return; }
+        if (!started) { ctx.moveTo(xAt(i), yAt(v)); started = true; }
+        else ctx.lineTo(xAt(i), yAt(v));
+      });
+      ctx.stroke();
+      // Dot at last point
+      const lastDay = [...(map.get(name)?.keys() || [])].sort().pop();
+      if (lastDay) {
+        const lv = map.get(name)!.get(lastDay)!;
+        const li = dayList.indexOf(lastDay);
+        if (li >= 0) {
+          ctx.beginPath(); ctx.arc(xAt(li), yAt(lv), isMe ? 4 : 3, 0, Math.PI * 2);
+          ctx.fillStyle = color; ctx.fill();
+        }
+      }
+      ctx.restore();
+    });
+
+    // Legend
+    ctx.globalAlpha = 1;
+    let lx = PAD.left;
+    playerList.forEach((name, pi) => {
+      const hue = HUES[pi % HUES.length];
+      const color = `hsl(${hue},75%,57%)`;
+      ctx.fillStyle = color;
+      ctx.fillRect(lx, H - 10, 16, 3);
+      ctx.fillStyle = name === myName ? "#fff" : "rgba(255,255,255,0.55)";
+      ctx.font = `${name === myName ? "bold " : ""}9px ui-monospace, monospace`;
+      ctx.textAlign = "left";
+      ctx.fillText(name + (name === myName ? " ★" : ""), lx + 20, H - 7);
+      lx += ctx.measureText(name).width + 36;
+    });
+  }, [data, myName]);
+
+  const mono: CSSProperties = { fontFamily: "ui-monospace, monospace" };
+  return (
+    <div style={{ padding: "1.5rem 1rem", maxWidth: 700, margin: "0 auto", width: "100%" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
+        <h2 style={{ ...mono, fontSize: 13, fontWeight: 900, letterSpacing: "0.2em", color: "rgba(0,240,200,0.7)", textTransform: "uppercase" }}>
+          Token History
+        </h2>
+        <div style={{ display: "flex", gap: 4 }}>
+          {[7, 14, 30].map((d) => (
+            <button key={d} onClick={() => setDays(d)} style={{
+              ...mono, fontSize: 10, fontWeight: 700,
+              background: days === d ? "rgba(0,255,200,0.15)" : "rgba(255,255,255,0.05)",
+              border: `1px solid ${days === d ? "rgba(0,255,200,0.4)" : "rgba(255,255,255,0.08)"}`,
+              color: days === d ? "#4affe0" : "rgba(255,255,255,0.35)",
+              borderRadius: 12, padding: "3px 10px", cursor: "pointer",
+            }}>{d}d</button>
+          ))}
+        </div>
+      </div>
+      {loading && <p style={{ ...mono, fontSize: 11, color: "rgba(255,255,255,0.25)" }}>Loading…</p>}
+      {!loading && data.length === 0 && (
+        <p style={{ ...mono, fontSize: 11, color: "rgba(255,255,255,0.25)" }}>No history yet — snapshots are written every 60s of active racing.</p>
+      )}
+      {!loading && data.length > 0 && (
+        <canvas
+          ref={canvasRef}
+          width={660} height={280}
+          style={{ width: "100%", height: "auto", borderRadius: 8, display: "block" }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Race shell with tab switcher ──────────────────────────────────────────────
+type Tab = "live" | "leaderboard" | "history";
+
+function RaceShell({ session, serverUrl, period, setPeriod, myTokens, lastRefresh, handleExit, handleLogout }: {
+  session: Session;
+  serverUrl: string;
+  period: Period;
+  setPeriod: (p: Period) => void;
+  myTokens: number;
+  lastRefresh: number | null;
+  handleExit: () => void;
+  handleLogout: () => void;
+}) {
+  const [tab, setTab] = useState<Tab>("live");
+  const mono: CSSProperties = { fontFamily: "ui-monospace, monospace" };
+
+  const TAB_BTN = (t: Tab, label: string) => (
+    <button
+      key={t}
+      onClick={() => setTab(t)}
+      style={{
+        ...mono, fontSize: 11, fontWeight: 700, letterSpacing: "0.1em",
+        background: tab === t ? "rgba(0,255,200,0.12)" : "transparent",
+        border: `1px solid ${tab === t ? "rgba(0,255,200,0.35)" : "rgba(255,255,255,0.08)"}`,
+        color: tab === t ? "#4affe0" : "rgba(255,255,255,0.3)",
+        borderRadius: 14, padding: "4px 14px", cursor: "pointer", transition: "all 0.2s",
+      }}
+    >{label}</button>
+  );
+
+  return (
+    <div className="fixed inset-0 bg-[#03040a]" style={{ display: "flex", flexDirection: "column" }}>
+      {/* Top bar */}
+      <div style={{
+        position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)",
+        zIndex: 80, display: "flex", alignItems: "center", gap: 6,
+        background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.08)",
+        borderRadius: 24, padding: "4px 8px", backdropFilter: "blur(10px)",
+      }}>
+        {/* Period filters — only on live tab */}
+        {tab === "live" && PERIODS.filter((p) => p.key !== "custom").map(({ key }) => (
           <button
             key={key}
             onClick={() => setPeriod(key)}
-            className={`px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-[0.12em] transition-all cursor-pointer ${
-              period === key ? "bg-white/15 text-white shadow-sm" : "text-white/35 hover:text-white/65 hover:bg-white/8"
-            }`}
+            style={{
+              ...mono, fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase",
+              background: period === key ? "rgba(255,255,255,0.12)" : "transparent",
+              border: "none", color: period === key ? "#fff" : "rgba(255,255,255,0.3)",
+              borderRadius: 12, padding: "3px 9px", cursor: "pointer",
+            }}
           >{key}</button>
         ))}
-        {lastRefresh && (
-          <span className="ml-1 pl-2 border-l border-white/10 text-[9px] text-white/20 font-mono uppercase tracking-widest">
+        {tab === "live" && <span style={{ width: 1, height: 14, background: "rgba(255,255,255,0.1)" }} />}
+        {TAB_BTN("live", "🚀 Live")}
+        {TAB_BTN("leaderboard", "🏆 All-Time")}
+        {TAB_BTN("history", "📈 History")}
+        {lastRefresh && tab === "live" && (
+          <span style={{ ...mono, fontSize: 9, color: "rgba(255,255,255,0.18)", paddingLeft: 4 }}>
             {new Date(lastRefresh).toLocaleTimeString()}
           </span>
         )}
-        {/* Logout */}
-        <button
-          onClick={handleLogout}
-          className="ml-1 pl-2 border-l border-white/10 text-[9px] text-white/20 hover:text-white/50 font-mono uppercase tracking-widest cursor-pointer transition-colors"
-        >logout</button>
+        <span style={{ width: 1, height: 14, background: "rgba(255,255,255,0.1)" }} />
+        <button onClick={handleLogout} style={{ ...mono, fontSize: 9, color: "rgba(255,255,255,0.2)", background: "none", border: "none", cursor: "pointer", padding: "0 4px" }}>logout</button>
       </div>
 
-      <MultiplayerRace
-        serverUrl={RACE_SERVER_URL}
-        playerName={session.displayName}
-        playerToken={session.token}
-        myTokens={myTokens}
-        onExit={handleExit}
-      />
+      {/* Back button */}
+      <button
+        onClick={handleExit}
+        style={{
+          position: "absolute", top: 14, left: 14, zIndex: 80,
+          background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.12)",
+          borderRadius: 20, padding: "5px 14px",
+          ...mono, fontSize: 11, fontWeight: 700,
+          color: "rgba(255,255,255,0.4)", cursor: "pointer", backdropFilter: "blur(6px)",
+        }}
+      >← Exit</button>
+
+      {/* Content */}
+      {tab === "live" && (
+        <MultiplayerRace
+          serverUrl={serverUrl}
+          playerName={session.displayName}
+          playerToken={session.token}
+          myTokens={myTokens}
+          onExit={handleExit}
+        />
+      )}
+
+      {tab !== "live" && (
+        <div style={{
+          flex: 1, overflowY: "auto", paddingTop: "4.5rem",
+          scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent",
+        }}>
+          {tab === "leaderboard" && <LeaderboardPanel serverUrl={serverUrl} />}
+          {tab === "history" && <HistoryPanel serverUrl={serverUrl} myName={session.displayName} />}
+        </div>
+      )}
     </div>
   );
 }
