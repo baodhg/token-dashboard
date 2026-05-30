@@ -2,7 +2,8 @@
 // Auto-logins with RACE_PLAYER_NAME + RACE_PLAYER_PASSWORD, caches the JWT,
 // and re-authenticates transparently when the token expires or is rejected.
 
-const RACE_SERVER_URL  = process.env.NEXT_PUBLIC_RACE_SERVER_URL || "";
+// NEXT_PUBLIC_ prefix only exposes to browser — use both for server-side access
+const RACE_SERVER_URL  = process.env.RACE_SERVER_URL || process.env.NEXT_PUBLIC_RACE_SERVER_URL || "";
 const RACE_PLAYER_NAME = process.env.RACE_PLAYER_NAME  || "";
 const RACE_PLAYER_PASS = process.env.RACE_PLAYER_PASSWORD || "";
 
