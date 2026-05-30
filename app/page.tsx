@@ -660,10 +660,16 @@ const [customRange, setCustomRange] = useState(() => ({
               {recalcMsg ?? (recalculating ? "Recalculating…" : "Recalc $")}
             </button>
             <button
+              onClick={() => router.push(`/model-race?period=${period}${source !== "all" ? `&source=${source}` : ""}`)}
+              className="flex items-center gap-1.5 px-4 h-8 rounded-full text-[12px] font-bold transition-all cursor-pointer bg-muted hover:bg-muted/70 text-[#3c3c43] dark:text-[#c7c7cc]"
+            >
+              🚀 Model Race
+            </button>
+            <button
               onClick={() => router.push(`/race?period=${period}${source !== "all" ? `&source=${source}` : ""}`)}
               className="flex items-center gap-1.5 px-4 h-8 rounded-full text-[12px] font-bold transition-all cursor-pointer bg-muted hover:bg-muted/70 text-[#3c3c43] dark:text-[#c7c7cc]"
             >
-              🚀 Race Mode
+              🌍 Global Race
             </button>
           </div>
         </div>
