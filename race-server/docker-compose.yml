@@ -1,25 +1,41 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: racedb
+      POSTGRES_USER: race
+      POSTGRES_PASSWORD: change-me-db-password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U race -d racedb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   race-server:
     build: .
     ports:
       - "3001:3001"
     environment:
       PORT: "3001"
-      # Comma-separated allowed origins, e.g. "http://localhost:3000,https://your-domain.com"
+      # Comma-separated allowed origins, e.g. "http://localhost:3000,https://your-dashboard.com"
       ALLOWED_ORIGINS: "*"
       # Change these before deploying!
       JWT_SECRET: "change-me-to-a-long-random-string"
       ADMIN_KEY: "change-me-admin-key"
-      DATA_DIR: "/app/data"
-      # Same PostgreSQL as your dashboard — for leaderboard & history.
-      # If your DB is on the host machine, use host.docker.internal instead of localhost.
-      DATABASE_URL: "postgresql://postgres:password@host.docker.internal:5432/token_dashboard"
-    volumes:
-      # Persist users.json outside the container
-      - ./data:/app/data
+      # Internal DB for users + race_snapshots (NOT the local dashboard DB)
+      DATABASE_URL: "postgresql://race:change-me-db-password@postgres:5432/racedb"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+volumes:
+  pgdata:
