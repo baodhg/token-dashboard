@@ -101,16 +101,27 @@ function Scanlines() {
 
 // ── Auth Gate: login / register ───────────────────────────────────────────────
 function AuthGate({ serverUrl, onAuth }: { serverUrl: string; onAuth: (s: Session) => void }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const switchMode = (m: "login" | "register") => {
+    setMode(m); setError(""); setPassword(""); setConfirm("");
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const n = name.trim().slice(0, 32);
     const p = password;
     if (!n || !p) return;
+    if (mode === "register") {
+      if (p.length < 4) { setError("Password must be at least 4 characters"); return; }
+      if (p !== confirm) { setError("Passwords do not match"); return; }
+      if (p === DEFAULT_PW) { setError(`Password cannot be "${DEFAULT_PW}"`); return; }
+    }
     setLoading(true); setError("");
     try {
       const res = await fetch(`${serverUrl}/auth/login`, {
@@ -119,12 +130,17 @@ function AuthGate({ serverUrl, onAuth }: { serverUrl: string; onAuth: (s: Sessio
         body: JSON.stringify({ name: n, password: p }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error || "Login failed"); return; }
+      if (!res.ok) {
+        // If registering and name already taken, surface a clearer message
+        if (mode === "register" && res.status === 401) {
+          setError("Name already taken — please log in or choose another name");
+        } else {
+          setError(data.error || "Failed");
+        }
+        return;
+      }
       if (data.mustChangePassword) {
-        // Redirect to change-password flow via a temporary session marker
         sessionStorage.setItem(SESSION_KEY + "_pending", JSON.stringify({ displayName: data.displayName, token: data.token, name: n }));
-        window.location.hash = "#change-password";
-        // Force re-render by setting a state — parent will pick it up
         setError("__must_change__");
         return;
       }
@@ -135,40 +151,79 @@ function AuthGate({ serverUrl, onAuth }: { serverUrl: string; onAuth: (s: Sessio
     finally { setLoading(false); }
   };
 
-  if (error === "__must_change__") return null; // parent re-renders with ChangePasswordGate
+  if (error === "__must_change__") return null;
+
+  const isLogin = mode === "login";
+  const TAB_S = (active: boolean): CSSProperties => ({
+    flex: 1, padding: "8px 0", fontFamily: "ui-monospace, monospace",
+    fontSize: 11, fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase",
+    background: active ? "rgba(0,255,200,0.12)" : "transparent",
+    border: "none", borderBottom: `2px solid ${active ? "rgba(0,255,200,0.6)" : "rgba(255,255,255,0.08)"}`,
+    color: active ? "#4affe0" : "rgba(255,255,255,0.25)",
+    cursor: "pointer", transition: "all 0.2s",
+  });
 
   return (
     <div style={{
       position: "fixed", inset: 0, background: "radial-gradient(ellipse at center, #0a0d1c 0%, #03040a 70%)",
-      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1.6rem", zIndex: 100,
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1.4rem", zIndex: 100,
     }}>
       <Scanlines />
-      <h1 className="glitch-title" data-text="TOKEN RACE" style={{ marginBottom: "0.4rem" }}>TOKEN RACE</h1>
-      <div className="race-splash-sub">Enter your racer identity</div>
-      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem", zIndex: 1 }}>
-        <input
-          autoFocus
-          value={name} onChange={(e) => setName(e.target.value)}
-          placeholder="Racer name" maxLength={32}
-          style={{ ...INPUT_STYLE }}
-        />
-        <input
-          type="password"
-          value={password} onChange={(e) => setPassword(e.target.value)}
-          placeholder="Password"
-          style={{ ...INPUT_STYLE }}
-        />
-        {error && <div style={ERR_STYLE}>{error}</div>}
-        <CyberBtn type="submit" disabled={!name.trim() || !password || loading}>
-          {loading ? "…" : "Join Race →"}
-        </CyberBtn>
-      </form>
-      <div className="race-splash-sub" style={{ opacity: 0.35, fontSize: "0.55rem" }}>
-        New racer? Enter any name + password to register automatically.
+      <h1 className="glitch-title" data-text="TOKEN RACE" style={{ marginBottom: "0.2rem" }}>TOKEN RACE</h1>
+      <div className="race-splash-sub" style={{ marginBottom: "0.4rem" }}>Multiplayer · Token Velocity · Global</div>
+
+      <div style={{ width: 280, zIndex: 1 }}>
+        {/* Login / Register tabs */}
+        <div style={{ display: "flex", marginBottom: "1.2rem" }}>
+          <button style={TAB_S(isLogin)} onClick={() => switchMode("login")}>Login</button>
+          <button style={TAB_S(!isLogin)} onClick={() => switchMode("register")}>Register</button>
+        </div>
+
+        <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "0.65rem" }}>
+          <input
+            autoFocus
+            value={name} onChange={(e) => setName(e.target.value)}
+            placeholder="Racer name" maxLength={32}
+            style={{ ...INPUT_STYLE, width: "100%", boxSizing: "border-box" }}
+          />
+          <input
+            type="password"
+            value={password} onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            style={{ ...INPUT_STYLE, width: "100%", boxSizing: "border-box" }}
+          />
+          {!isLogin && (
+            <input
+              type="password"
+              value={confirm} onChange={(e) => setConfirm(e.target.value)}
+              placeholder="Confirm password"
+              style={{ ...INPUT_STYLE, width: "100%", boxSizing: "border-box" }}
+            />
+          )}
+          {error && <div style={{ ...ERR_STYLE, width: "100%", boxSizing: "border-box" }}>{error}</div>}
+          <CyberBtn
+            type="submit"
+            disabled={!name.trim() || !password || (!isLogin && !confirm) || loading}
+          >
+            {loading ? "…" : isLogin ? "Login →" : "Create Account →"}
+          </CyberBtn>
+        </form>
+
+        <p style={{
+          fontFamily: "ui-monospace, monospace", fontSize: "0.6rem",
+          color: "rgba(190,255,245,0.25)", textAlign: "center",
+          marginTop: "1rem", lineHeight: 1.6,
+        }}>
+          {isLogin
+            ? "No account? Switch to Register above."
+            : "Your token count is read from your local dashboard and reported to the race server."}
+        </p>
       </div>
     </div>
   );
 }
+
+const DEFAULT_PW = "123456";
 
 // ── Change Password Gate ──────────────────────────────────────────────────────
 function ChangePasswordGate({ serverUrl, pendingName, onDone }: {
