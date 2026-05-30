@@ -131,20 +131,11 @@ const httpServer = createServer(async (req, res) => {
     if (typeof totalTokens !== "number" || !isFinite(totalTokens) || totalTokens < 0) {
       return json(res, 400, { error: "Invalid totalTokens" });
     }
-    // Find existing socket entry for this player name, or use a synthetic key
-    const syntheticKey = "__server__" + payload.name;
-    players.set(syntheticKey, {
-      name: payload.name,
-      totalTokens: Math.floor(totalTokens),
-      updatedAt: Date.now(),
-    });
-    // Update dbSnapshot in-memory immediately so broadcast reflects new value
     dbSnapshot.set(payload.name, {
       name: payload.name,
       totalTokens: Math.floor(totalTokens),
       updatedAt: Date.now(),
     });
-    broadcast();
     return json(res, 200, { ok: true, name: payload.name, totalTokens });
   }
 
