@@ -253,11 +253,16 @@ async function syncJSONLFile(filePath: string, fileName: string): Promise<number
   // Session not in SQLite yet — parse per-request token_count events
   let project: string | null = null;
   let model = "codex";
-  // For first read: scan full file for cwd (session_meta) and initial model (first turn_context)
-  if (lastSize === BigInt(0)) {
+
+  // Recover project and the latest model from the already processed part of the file
+  if (lastSize > BigInt(0)) {
     try {
-      const head = await readFile(filePath, "utf-8");
-      for (const l of head.split("\n")) {
+      const fhHead = await open(filePath, "r");
+      const headBuf = Buffer.alloc(Number(lastSize));
+      await fhHead.read(headBuf, 0, Number(lastSize), 0);
+      await fhHead.close();
+      const headStr = headBuf.toString("utf-8");
+      for (const l of headStr.split("\n")) {
         if (!project && l.includes('"session_meta"')) {
           try {
             const m: { type?: string; payload?: { cwd?: string } } = JSON.parse(l);
@@ -267,7 +272,7 @@ async function syncJSONLFile(filePath: string, fileName: string): Promise<number
         if (l.includes('"turn_context"')) {
           try {
             const tc: { type?: string; payload?: { model?: string } } = JSON.parse(l);
-            if (tc.type === "turn_context" && tc.payload?.model) { model = tc.payload.model; break; }
+            if (tc.type === "turn_context" && tc.payload?.model) { model = tc.payload.model; }
           } catch { /* skip */ }
         }
       }
@@ -280,6 +285,13 @@ async function syncJSONLFile(filePath: string, fileName: string): Promise<number
 
   for (const line of lines) {
     if (!line.trim()) continue;
+
+    if (!project && line.includes('"session_meta"')) {
+      try {
+        const m: { type?: string; payload?: { cwd?: string } } = JSON.parse(line);
+        if (m.payload?.cwd) project = extractProject(m.payload.cwd);
+      } catch { /* skip */ }
+    }
 
     // Track model changes within new bytes via turn_context
     if (line.includes('"turn_context"')) {
@@ -300,10 +312,10 @@ async function syncJSONLFile(filePath: string, fileName: string): Promise<number
     if (!entry.timestamp) continue;
 
     const u      = entry.payload.info.last_token_usage;
-    const input  = u.input_tokens ?? 0;
-    const output = (u.output_tokens ?? 0) + (u.reasoning_output_tokens ?? 0);
     const cache  = u.cached_input_tokens ?? 0;
-    if (input === 0 && output === 0) continue;
+    const input  = Math.max(0, (u.input_tokens ?? 0) - cache);
+    const output = (u.output_tokens ?? 0) + (u.reasoning_output_tokens ?? 0);
+    if (input === 0 && cache === 0 && output === 0) continue;
 
     const id = `codex_${sessionUuid}_${entry.timestamp}`;
     if (seen.has(id)) continue;

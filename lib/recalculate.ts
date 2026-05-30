@@ -7,6 +7,7 @@ import { calcCost, type ModelPrice } from "./sync/types";
 // cacheWrite uses 1h price — Claude Code uses ephemeral_1h by default
 const CLAUDE_PRICES: Record<string, ModelPrice> = {
   // Opus 4.x new generation — $5 input
+  "claude-opus-4-8":           { input: 5,     output: 25,    cacheRead: 0.5,    cacheWrite: 10    },
   "claude-opus-4-7":           { input: 5,     output: 25,    cacheRead: 0.5,    cacheWrite: 10    },
   "claude-opus-4-6":           { input: 5,     output: 25,    cacheRead: 0.5,    cacheWrite: 10    },
   "claude-opus-4-5":           { input: 5,     output: 25,    cacheRead: 0.5,    cacheWrite: 10    },

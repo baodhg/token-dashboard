@@ -15,6 +15,7 @@ import type { ModelPrice, SyncResult } from "./types";
 // cacheRead = 0.1× input  |  cacheWrite(1h) = 2× input  |  cacheWrite(5m) = 1.25× input
 const PRICES: Record<string, ModelPrice> = {
   // Opus 4.x new generation — $5 input (NOT the old $15 Opus 4.1 price)
+  "claude-opus-4-8":           { input: 5,     output: 25,    cacheRead: 0.5,    cacheWrite: 10    },
   "claude-opus-4-7":           { input: 5,     output: 25,    cacheRead: 0.5,    cacheWrite: 10    },
   "claude-opus-4-6":           { input: 5,     output: 25,    cacheRead: 0.5,    cacheWrite: 10    },
   "claude-opus-4-5":           { input: 5,     output: 25,    cacheRead: 0.5,    cacheWrite: 10    },

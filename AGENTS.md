@@ -232,7 +232,7 @@ Source: anthropic.com/pricing, verified 2026-05-22. `cacheWrite` = 1h ephemeral 
 
 | Model | Input | Output | Cache Read | Cache Write (1h) |
 |---|---|---|---|---|
-| Opus 4.7 / 4.6 / 4.5 | $5 | $25 | $0.50 | $10 |
+| Opus 4.8 / 4.7 / 4.6 / 4.5 | $5 | $25 | $0.50 | $10 |
 | Opus 4.1 / Opus 4 (legacy) | $15 | $75 | $1.50 | $30 |
 | Sonnet 4.6 / 4.5 / 4 | $3 | $15 | $0.30 | $6 |
 | Haiku 4.5 | $1 | $5 | $0.10 | $2 |

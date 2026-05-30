@@ -11,6 +11,7 @@ import {
 import { PERIODS, type Period, type DataPoint } from "@/lib/mock-data";
 import type { ModelStat } from "@/components/ModelChart";
 import { useI18n } from "@/lib/i18n-context";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const TokenChart = dynamic<{ data: DataPoint[]; period: Period; animationKey?: number }>(
   () => import("@/components/TokenChart"), { ssr: false }
@@ -21,7 +22,6 @@ const CacheChart = dynamic<{ data: DataPoint[]; period: Period; animationKey?: n
 const ModelChart = dynamic<{ data: ModelStat[]; animationKey?: number }>(
   () => import("@/components/ModelChart"), { ssr: false }
 );
-
 /* ─── helpers ────────────────────────────────────────── */
 
 function formatK(n: number) {
@@ -319,7 +319,7 @@ function DashboardContent() {
   const [recalculating, setRecalculating] = useState(false);
   const [recalcMsg, setRecalcMsg]     = useState<string | null>(null);
   const [theme, setTheme]         = useState<"light" | "dark" | "system">("system");
-  const [customRange, setCustomRange] = useState(() => ({
+const [customRange, setCustomRange] = useState(() => ({
     from: searchParams.get("from") || new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0],
     to:   searchParams.get("to")   || new Date().toISOString().split('T')[0]
   }));
@@ -659,15 +659,22 @@ function DashboardContent() {
               <Calculator className={`w-3.5 h-3.5 ${recalculating ? "animate-pulse" : ""}`} />
               {recalcMsg ?? (recalculating ? "Recalculating…" : "Recalc $")}
             </button>
+            <button
+              onClick={() => router.push(`/race?period=${period}${source !== "all" ? `&source=${source}` : ""}`)}
+              className="flex items-center gap-1.5 px-4 h-8 rounded-full text-[12px] font-bold transition-all cursor-pointer bg-muted hover:bg-muted/70 text-[#3c3c43] dark:text-[#c7c7cc]"
+            >
+              🚀 Race Mode
+            </button>
           </div>
         </div>
       </header>
 
+
       {/* ── Main ── */}
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-5">
 
-        {/* Source filter */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
+            {/* Source filter */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-2 shrink-0" style={{ scrollbarWidth: "none" }}>
           {(["all", "claude_code", "cline", "codex", "gemini", "antigravity_cli", "github_copilot", "cursor"] as Source[]).map(s => {
             const label = s === "all" ? t("common.all") : SOURCE_LABELS[s];
             const isSelected = source === s;

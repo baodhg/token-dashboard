@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Race Mode — Galaxy</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #03040a; overflow: hidden; }
+  body { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  #stage { position: fixed; inset: 0; overflow: hidden; }
+  #sky { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+
+  #labels { position: absolute; inset: 0; pointer-events: none; }
+  .lbl {
+    position: absolute; top: 0; left: 0;
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    backdrop-filter: blur(8px);
+    will-change: transform;
+    transform: translate3d(-300px, -300px, 0) translateY(-50%);
+    white-space: nowrap;
+  }
+  .lbl .meta { display: flex; flex-direction: column; line-height: 1.05; }
+  .lbl .name { font-size: 9px; font-weight: 700; letter-spacing: 0.18em; color: rgba(255,255,255,0.55); text-transform: uppercase; }
+  .lbl .val  { font-size: 17px; font-weight: 900; font-variant-numeric: tabular-nums; }
+  .rank { font-size: 11px; font-weight: 900; color: rgba(255,255,255,0.4); width: 16px; text-align: center; }
+
+  /* HUD */
+  #hud-title {
+    position: absolute; top: 22px; left: 28px; pointer-events: none;
+    font-size: 12px; font-weight: 900; letter-spacing: 0.34em;
+    color: rgba(255,255,255,0.34); text-transform: uppercase;
+    display: flex; align-items: center; gap: 12px;
+  }
+  #hud-title .dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; box-shadow: 0 0 12px #10b981; animation: blink 1.6s ease-in-out infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+  #exit {
+    position: absolute; top: 18px; right: 24px; z-index: 10;
+    display: flex; align-items: center; gap: 7px;
+    padding: 9px 16px; border-radius: 999px;
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14);
+    color: rgba(255,255,255,0.85); font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+    cursor: pointer; backdrop-filter: blur(10px);
+    transition: background .18s, transform .18s;
+  }
+  #exit:hover { background: rgba(255,255,255,0.14); transform: translateY(-1px); }
+
+  #finish {
+    position: absolute; right: 5%; top: 0; height: 100%;
+    width: 2px; pointer-events: none;
+    background: linear-gradient(to bottom, transparent, rgba(255,220,150,0.0));
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="sky"></canvas>
+    <div id="labels"></div>
+    <div id="hud-title"><span class="dot"></span>Model Race · Token Velocity</div>
+    <button id="exit">✕ Exit Race</button>
+  </div>
+
+  <script src="galaxy-bg.js"></script>
+  <script src="rockets.js"></script>
+  <script>
+  (function () {
+    const COLORS = ["#10b981","#a855f7","#f97316","#06b6d4","#f43f5e","#3b82f6","#eab308"];
+
+    // ── mock data (mirrors the dashboard model stats) ────────────────────────
+    const DATA = [
+      { model: "claude-sonnet-4-6", totalTokens: 4_820_000 },
+      { model: "gpt-5",             totalTokens: 3_140_000 },
+      { model: "gemini-2.5-pro",    totalTokens: 2_050_000 },
+      { model: "cline-large",       totalTokens: 1_180_000 },
+      { model: "copilot",           totalTokens: 690_000 },
+      { model: "cursor-fast",       totalTokens: 410_000 },
+      { model: "claude-haiku",      totalTokens: 150_000 },
+    ];
+
+    const fmt = (v) => v >= 1e6 ? (v/1e6).toFixed(2)+"M" : v >= 1e3 ? (v/1e3).toFixed(1)+"K" : ""+v;
+
+    const canvas = document.getElementById("sky");
+    const ctx = canvas.getContext("2d");
+    const labelsEl = document.getElementById("labels");
+
+    const top = [...DATA].filter(d=>d.totalTokens>0).sort((a,b)=>b.totalTokens-a.totalTokens).slice(0,7)
+      .map((d,i)=>({ ...d, color: COLORS[i%COLORS.length] }));
+
+    // build label DOM
+    const labelMap = new Map();
+    top.forEach((m, i) => {
+      const el = document.createElement("div");
+      el.className = "lbl";
+      el.style.background = `linear-gradient(135deg, ${m.color}26, ${m.color}0d)`;
+      el.style.boxShadow = `0 0 18px ${m.color}33, inset 0 1px 0 rgba(255,255,255,0.08)`;
+      el.innerHTML = `
+        <span class="rank">#${i+1}</span>
+        <div class="meta">
+          <span class="name">${m.model}</span>
+          <span class="val" style="color:${m.color}; text-shadow:0 0 12px ${m.color}99">${fmt(m.totalTokens)}</span>
+        </div>`;
+      labelsEl.appendChild(el);
+      labelMap.set(m.model, el);
+    });
+
+    let W=0, H=0, dpr=1;
+    function resize() {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      W = canvas.clientWidth; H = canvas.clientHeight;
+      canvas.width = W * dpr; canvas.height = H * dpr;
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      GalaxyBG.resize(W, H);
+      Rockets.setModels(top);
+      Rockets.layout(W, H, GalaxyBG.destX);
+    }
+    window.addEventListener("resize", resize);
+
+    let t = 0, raf;
+    function loop() {
+      t += 1/60;
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      ctx.clearRect(0,0,W,H);
+      GalaxyBG.drawDeep(ctx, t);
+      const ships = Rockets.frame(ctx, t);
+      GalaxyBG.drawFront(ctx, t);
+
+      ships.forEach((s) => {
+        const el = labelMap.get(s.model);
+        if (el) el.style.transform = `translate3d(${s.x + 96}px, ${s.y}px, 0) translateY(-50%)`;
+      });
+
+      raf = requestAnimationFrame(loop);
+    }
+
+    resize();
+    Rockets.layout(W, H, GalaxyBG.destX);
+    loop();
+
+    // debug: synchronously advance N frames (for offline verification)
+    window.__advance = function (frames) {
+      for (let k = 0; k < frames; k++) {
+        t += 1/60;
+        ctx.setTransform(dpr,0,0,dpr,0,0);
+        ctx.clearRect(0,0,W,H);
+        GalaxyBG.drawDeep(ctx, t);
+        const ships = Rockets.frame(ctx, t);
+        GalaxyBG.drawFront(ctx, t);
+        ships.forEach((s) => {
+          const el = labelMap.get(s.model);
+          if (el) el.style.transform = `translate3d(${s.x + 96}px, ${s.y}px, 0) translateY(-50%)`;
+        });
+      }
+    };
+
+    document.getElementById("exit").addEventListener("click", () => {
+      alert("(prototype) Exit Race Mode");
+    });
+  })();
+  </script>
+
+  <template id="__bundler_thumbnail">
+    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" fill="#06081a"/>
+      <circle cx="78" cy="40" r="10" fill="#ffce7a"/>
+      <path d="M30 56 l20 -4 8 4 -8 4 z" fill="#e8edf5"/>
+      <path d="M30 56 l-14 -3 0 6 z" fill="#ff7a1e"/>
+      <circle cx="22" cy="22" r="1.4" fill="#fff"/>
+      <circle cx="60" cy="70" r="1.4" fill="#9bd"/>
+    </svg>
+  </template>
+</body>
+</html>
