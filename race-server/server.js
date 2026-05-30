@@ -1,3 +1,4 @@
+require("dotenv").config();
 const { createServer } = require("http");
 const { Server } = require("socket.io");
 const bcrypt = require("bcryptjs");
@@ -195,7 +196,6 @@ const httpServer = createServer(async (req, res) => {
     return json(res, 200, { days, history: rows });
   }
 
-  // ── History: single player by hour ────────────────────────────────────────
   if (urlPath === "/history" && req.method === "GET") {
     const name = qs.get("name");
     const days = Math.min(90, Math.max(1, parseInt(qs.get("days") || "7", 10)));
@@ -210,7 +210,6 @@ const httpServer = createServer(async (req, res) => {
     return json(res, 200, { name, days, history: rows });
   }
 
-  // ── Admin: list users ─────────────────────────────────────────────────────
   if (urlPath === "/admin/users" && req.method === "GET") {
     if ((req.headers["x-admin-key"] || "") !== ADMIN_KEY) return json(res, 403, { error: "Forbidden" });
     const { rows } = await db.query(
@@ -223,7 +222,6 @@ const httpServer = createServer(async (req, res) => {
     })) });
   }
 
-  // ── Admin: reset password ─────────────────────────────────────────────────
   if (urlPath === "/admin/reset-password" && req.method === "POST") {
     const body = await readBody(req);
     const adminKey = body.adminKey || req.headers["x-admin-key"] || "";
@@ -250,7 +248,6 @@ const httpServer = createServer(async (req, res) => {
   res.writeHead(404); res.end();
 });
 
-// ── Socket.io ─────────────────────────────────────────────────────────────────
 const io = new Server(httpServer, {
   cors: { origin: ALLOWED_ORIGINS, methods: ["GET", "POST"] },
 });
