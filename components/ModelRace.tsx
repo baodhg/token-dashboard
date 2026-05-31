@@ -648,12 +648,6 @@ function createGalaxy() {
     core.addColorStop(0.75, "#ff9a3c"); core.addColorStop(1, "#d4641a");
     ctx.globalCompositeOperation = "source-over";
     ctx.fillStyle = core; ctx.beginPath(); ctx.arc(d.x, d.y, R, 0, TAU); ctx.fill();
-    ctx.globalCompositeOperation = "screen";
-    const flare = ctx.createLinearGradient(d.x - R * 9, d.y, d.x + R * 9, d.y);
-    flare.addColorStop(0, "transparent"); flare.addColorStop(0.5, "rgba(255,220,150,0.5)"); flare.addColorStop(1, "transparent");
-    ctx.fillStyle = flare;
-    ctx.fillRect(d.x - R * 9, d.y - 1.2, R * 18, 2.4);
-    ctx.fillRect(d.x - 1.2, d.y - R * 5, 2.4, R * 10);
     ctx.restore();
   }
 
