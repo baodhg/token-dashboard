@@ -13,21 +13,41 @@ const RACE_PERIOD = (process.env.RACE_PERIOD || "1d") as string;
 let cachedToken: string | null = null;
 let tokenExpiresAt = 0;
 
-async function login(): Promise<string | null> {
-  if (!RACE_SERVER_URL || !RACE_PLAYER_NAME || !RACE_PLAYER_PASS) return null;
+async function authRequest(path: string): Promise<Response | null> {
   try {
-    const res = await fetch(`${RACE_SERVER_URL}/auth/login`, {
+    return await fetch(`${RACE_SERVER_URL}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: RACE_PLAYER_NAME, password: RACE_PLAYER_PASS }),
     });
-    if (!res.ok) { console.warn(`[race] login failed: ${res.status}`); return null; }
-    const data = await res.json();
-    cachedToken = data.token;
-    tokenExpiresAt = Date.now() + 6 * 24 * 60 * 60 * 1000; // refresh before 7d expiry
-    console.log(`[race] logged in as "${data.displayName}" (period: ${RACE_PERIOD})`);
-    return cachedToken;
   } catch { return null; }
+}
+
+async function login(): Promise<string | null> {
+  if (!RACE_SERVER_URL || !RACE_PLAYER_NAME || !RACE_PLAYER_PASS) return null;
+
+  let res = await authRequest("/auth/login");
+  if (!res) return null;
+
+  // Login no longer auto-creates accounts. If this player has never been
+  // registered (404), bootstrap the account once via /auth/register.
+  if (res.status === 404) {
+    console.log(`[race] account "${RACE_PLAYER_NAME}" not found — registering`);
+    const reg = await authRequest("/auth/register");
+    if (reg && reg.ok) {
+      res = reg;
+    } else {
+      console.warn(`[race] register failed: ${reg ? reg.status : "no response"}`);
+      return null;
+    }
+  }
+
+  if (!res.ok) { console.warn(`[race] login failed: ${res.status}`); return null; }
+  const data = await res.json();
+  cachedToken = data.token;
+  tokenExpiresAt = Date.now() + 6 * 24 * 60 * 60 * 1000; // refresh before 7d expiry
+  console.log(`[race] logged in as "${data.displayName}" (period: ${RACE_PERIOD})`);
+  return cachedToken;
 }
 
 async function getToken(): Promise<string | null> {

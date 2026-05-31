@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, Suspense, CSSProperties, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { PERIODS, type Period } from "@/lib/mock-data";
 
 const MultiplayerRace = dynamic(
   () => import("@/components/MultiplayerRace"),
@@ -14,7 +13,6 @@ const RACE_SERVER_URL = process.env.NEXT_PUBLIC_RACE_SERVER_URL || "";
 const POLL_MS = 10_000;
 const INTRO_MS = 3_000;
 const FALLBACK_MIN_MS = 1_000;
-const RELOAD_MIN_MS = 500;
 const SESSION_KEY = "race_session"; // sessionStorage key
 
 interface Session {
@@ -124,16 +122,20 @@ function AuthGate({ serverUrl, onAuth }: { serverUrl: string; onAuth: (s: Sessio
     }
     setLoading(true); setError("");
     try {
-      const res = await fetch(`${serverUrl}/auth/login`, {
+      // Login and register are separate endpoints: /auth/login only accepts
+      // existing accounts, /auth/register creates a new one.
+      const endpoint = mode === "register" ? "/auth/register" : "/auth/login";
+      const res = await fetch(`${serverUrl}${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: n, password: p }),
       });
       const data = await res.json();
       if (!res.ok) {
-        // If registering and name already taken, surface a clearer message
-        if (mode === "register" && res.status === 401) {
+        if (mode === "register" && res.status === 409) {
           setError("Name already taken — please log in or choose another name");
+        } else if (mode === "login" && res.status === 404) {
+          setError("Account not found — switch to Register to create it");
         } else {
           setError(data.error || "Failed");
         }
@@ -323,10 +325,8 @@ function RaceContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const initialPeriod = (searchParams.get("period") as Period) || "1d";
   const initialSource = searchParams.get("source") || "all";
 
-  const [period, setPeriod] = useState<Period>(initialPeriod);
   const [source] = useState(initialSource);
   const [myTokens, setMyTokens] = useState(0);
   const [lastRefresh, setLastRefresh] = useState<number | null>(null);
@@ -344,13 +344,6 @@ function RaceContent() {
     const doneAt = setTimeout(() => setIntroReady(true), INTRO_MS);
     return () => { clearTimeout(fadeAt); clearTimeout(doneAt); };
   }, []);
-
-  const [reloadReady, setReloadReady] = useState(false);
-  useEffect(() => {
-    setReloadReady(false);
-    const id = setTimeout(() => setReloadReady(true), RELOAD_MIN_MS);
-    return () => clearTimeout(id);
-  }, [period]);
 
   // Restore session from sessionStorage + check pending change-pw
   useEffect(() => {
@@ -392,19 +385,22 @@ function RaceContent() {
     return () => { alive = false; clearInterval(id); };
   }, []);
 
-  // Keep the URL in sync with the current period/source (no re-fetch).
+  // Keep the source filter in the URL (no re-fetch). The race uses a single
+  // fixed window (RACE_PERIOD on the server), so there is no client period.
   useEffect(() => {
-    const params = new URLSearchParams({ period });
+    const params = new URLSearchParams();
     if (source !== "all") params.set("source", source);
-    router.replace(`/race?${params.toString()}`, { scroll: false });
+    const qs = params.toString();
+    router.replace(qs ? `/race?${qs}` : "/race", { scroll: false });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, source]);
+  }, [source]);
 
   const handleExit = useCallback(() => {
-    const params = new URLSearchParams({ period });
+    const params = new URLSearchParams();
     if (source !== "all") params.set("source", source);
-    router.push(`/?${params.toString()}`);
-  }, [period, source, router]);
+    const qs = params.toString();
+    router.push(qs ? `/?${qs}` : "/");
+  }, [source, router]);
 
   const handleLogout = useCallback(() => {
     sessionStorage.removeItem(SESSION_KEY);
@@ -413,7 +409,7 @@ function RaceContent() {
 
   if (!RACE_SERVER_URL) return <NotConfigured onExit={handleExit} />;
 
-  if (!introReady || !reloadReady) {
+  if (!introReady) {
     return (
       <div className="fixed inset-0 bg-[#03040a]">
         <RaceSplash fading={introFading} />
@@ -455,8 +451,6 @@ function RaceContent() {
     <RaceShell
       session={session}
       serverUrl={RACE_SERVER_URL}
-      period={period}
-      setPeriod={setPeriod}
       myTokens={myTokens}
       lastRefresh={lastRefresh}
       handleExit={handleExit}
@@ -678,38 +672,134 @@ function HistoryPanel({ serverUrl, myName }: { serverUrl: string; myName: string
   );
 }
 
-// ── Token copy button — shows JWT for pasting into RACE_PLAYER_TOKEN in .env ──
-function TokenCopyBtn({ token }: { token: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard.writeText(token).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
+// ── Exit button — top-left, slides its arrow + brightens on hover ─────────────
+function ExitBtn({ onClick }: { onClick: () => void }) {
+  const [hover, setHover] = useState(false);
   return (
     <button
-      onClick={copy}
-      title="Copy RACE_PLAYER_TOKEN for .env"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
-        fontFamily: "ui-monospace, monospace", fontSize: 9, fontWeight: 700,
-        background: copied ? "rgba(0,255,200,0.15)" : "none",
-        border: copied ? "1px solid rgba(0,255,200,0.3)" : "1px solid rgba(255,255,255,0.06)",
-        color: copied ? "#4affe0" : "rgba(255,255,255,0.2)",
-        borderRadius: 10, padding: "2px 8px", cursor: "pointer", transition: "all 0.2s",
+        position: "absolute", top: 14, left: 14, zIndex: 80,
+        display: "inline-flex", alignItems: "center", gap: 6,
+        fontFamily: "ui-monospace, monospace", fontSize: 11, fontWeight: 700,
+        letterSpacing: "0.08em",
+        background: hover ? "rgba(0,255,200,0.1)" : "rgba(0,0,0,0.5)",
+        border: `1px solid ${hover ? "rgba(0,255,200,0.4)" : "rgba(255,255,255,0.12)"}`,
+        color: hover ? "#4affe0" : "rgba(255,255,255,0.4)",
+        borderRadius: 20, padding: "5px 14px", cursor: "pointer",
+        backdropFilter: "blur(6px)",
+        boxShadow: hover ? "0 0 12px rgba(0,240,200,0.25)" : "none",
+        transition: "all 0.2s",
       }}
-    >{copied ? "✓ copied" : "copy token"}</button>
+    >
+      <span style={{ display: "inline-block", transform: hover ? "translateX(-2px)" : "none", transition: "transform 0.2s" }}>←</span>
+      Exit
+    </button>
+  );
+}
+
+// ── Tab pill — cyan glow when active, subtle lift on hover ────────────────────
+function TabBtn({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+  const [hover, setHover] = useState(false);
+  const on = active || hover;
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        fontFamily: "ui-monospace, monospace", fontSize: 11, fontWeight: 700, letterSpacing: "0.1em",
+        background: active ? "rgba(0,255,200,0.14)" : hover ? "rgba(0,255,200,0.06)" : "transparent",
+        border: `1px solid ${active ? "rgba(0,255,200,0.45)" : hover ? "rgba(0,255,200,0.25)" : "rgba(255,255,255,0.08)"}`,
+        color: on ? "#4affe0" : "rgba(255,255,255,0.3)",
+        borderRadius: 14, padding: "4px 14px", cursor: "pointer", transition: "all 0.2s",
+        boxShadow: active ? "0 0 12px rgba(0,240,200,0.28)" : "none",
+      }}
+    >{label}</button>
+  );
+}
+
+// ── Logout pill — first click arms a confirm prompt, second confirms ──────────
+function LogoutBtn({ onClick }: { onClick: () => void }) {
+  const [hover, setHover] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset the armed state after a few seconds of inactivity.
+  const arm = () => {
+    setConfirming(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setConfirming(false), 3500);
+  };
+  const cancel = () => {
+    setConfirming(false);
+    if (timerRef.current) clearTimeout(timerRef.current);
+  };
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
+  const mono: CSSProperties = {
+    fontFamily: "ui-monospace, monospace", fontSize: 10, fontWeight: 700,
+    letterSpacing: "0.12em", textTransform: "uppercase",
+  };
+
+  if (confirming) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <span style={{ ...mono, fontSize: 9, color: "rgba(255,123,149,0.85)", paddingLeft: 2 }}>Sure?</span>
+        <button
+          onClick={onClick}
+          title="Confirm logout"
+          style={{
+            ...mono, color: "#ff7b95",
+            background: "rgba(255,60,90,0.18)", border: "1px solid rgba(255,80,110,0.6)",
+            borderRadius: 12, padding: "4px 10px", cursor: "pointer",
+            boxShadow: "0 0 12px rgba(255,60,90,0.35)", transition: "all 0.2s",
+          }}
+        >Yes</button>
+        <button
+          onClick={cancel}
+          title="Cancel"
+          style={{
+            ...mono, color: "rgba(255,255,255,0.45)",
+            background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.12)",
+            borderRadius: 12, padding: "4px 10px", cursor: "pointer", transition: "all 0.2s",
+          }}
+        >No</button>
+      </span>
+    );
+  }
+
+  return (
+    <button
+      onClick={arm}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title="Log out"
+      style={{
+        ...mono,
+        display: "inline-flex", alignItems: "center", gap: 5,
+        background: hover ? "rgba(255,60,90,0.14)" : "rgba(255,255,255,0.03)",
+        border: `1px solid ${hover ? "rgba(255,80,110,0.55)" : "rgba(255,255,255,0.08)"}`,
+        color: hover ? "#ff7b95" : "rgba(255,255,255,0.32)",
+        borderRadius: 14, padding: "4px 12px", cursor: "pointer",
+        boxShadow: hover ? "0 0 12px rgba(255,60,90,0.3)" : "none",
+        transition: "all 0.2s",
+      }}
+    >
+      <span style={{ fontSize: 11, lineHeight: 1 }}>⏻</span>
+      logout
+    </button>
   );
 }
 
 // ── Race shell with tab switcher ──────────────────────────────────────────────
 type Tab = "live" | "leaderboard" | "history";
 
-function RaceShell({ session, serverUrl, period, setPeriod, myTokens, lastRefresh, handleExit, handleLogout }: {
+function RaceShell({ session, serverUrl, myTokens, lastRefresh, handleExit, handleLogout }: {
   session: Session;
   serverUrl: string;
-  period: Period;
-  setPeriod: (p: Period) => void;
   myTokens: number;
   lastRefresh: number | null;
   handleExit: () => void;
@@ -717,20 +807,6 @@ function RaceShell({ session, serverUrl, period, setPeriod, myTokens, lastRefres
 }) {
   const [tab, setTab] = useState<Tab>("live");
   const mono: CSSProperties = { fontFamily: "ui-monospace, monospace" };
-
-  const TAB_BTN = (t: Tab, label: string) => (
-    <button
-      key={t}
-      onClick={() => setTab(t)}
-      style={{
-        ...mono, fontSize: 11, fontWeight: 700, letterSpacing: "0.1em",
-        background: tab === t ? "rgba(0,255,200,0.12)" : "transparent",
-        border: `1px solid ${tab === t ? "rgba(0,255,200,0.35)" : "rgba(255,255,255,0.08)"}`,
-        color: tab === t ? "#4affe0" : "rgba(255,255,255,0.3)",
-        borderRadius: 14, padding: "4px 14px", cursor: "pointer", transition: "all 0.2s",
-      }}
-    >{label}</button>
-  );
 
   return (
     <div className="fixed inset-0 bg-[#03040a]" style={{ display: "flex", flexDirection: "column" }}>
@@ -741,44 +817,20 @@ function RaceShell({ session, serverUrl, period, setPeriod, myTokens, lastRefres
         background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 24, padding: "4px 8px", backdropFilter: "blur(10px)",
       }}>
-        {/* Period filters — only on live tab */}
-        {tab === "live" && PERIODS.filter((p) => p.key !== "custom").map(({ key }) => (
-          <button
-            key={key}
-            onClick={() => setPeriod(key)}
-            style={{
-              ...mono, fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase",
-              background: period === key ? "rgba(255,255,255,0.12)" : "transparent",
-              border: "none", color: period === key ? "#fff" : "rgba(255,255,255,0.3)",
-              borderRadius: 12, padding: "3px 9px", cursor: "pointer",
-            }}
-          >{key}</button>
-        ))}
-        {tab === "live" && <span style={{ width: 1, height: 14, background: "rgba(255,255,255,0.1)" }} />}
-        {TAB_BTN("live", "🚀 Live")}
-        {TAB_BTN("leaderboard", "🏆 All-Time")}
-        {TAB_BTN("history", "📈 History")}
+        <TabBtn active={tab === "live"}        label="🚀 Live"     onClick={() => setTab("live")} />
+        <TabBtn active={tab === "leaderboard"} label="🏆 All-Time" onClick={() => setTab("leaderboard")} />
+        <TabBtn active={tab === "history"}     label="📈 History"  onClick={() => setTab("history")} />
         {lastRefresh && tab === "live" && (
           <span style={{ ...mono, fontSize: 9, color: "rgba(255,255,255,0.18)", paddingLeft: 4 }}>
             {new Date(lastRefresh).toLocaleTimeString()}
           </span>
         )}
         <span style={{ width: 1, height: 14, background: "rgba(255,255,255,0.1)" }} />
-        <button onClick={handleLogout} style={{ ...mono, fontSize: 9, color: "rgba(255,255,255,0.2)", background: "none", border: "none", cursor: "pointer", padding: "0 4px" }}>logout</button>
-        <TokenCopyBtn token={session.token} />
+        <LogoutBtn onClick={handleLogout} />
       </div>
 
       {/* Back button */}
-      <button
-        onClick={handleExit}
-        style={{
-          position: "absolute", top: 14, left: 14, zIndex: 80,
-          background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.12)",
-          borderRadius: 20, padding: "5px 14px",
-          ...mono, fontSize: 11, fontWeight: 700,
-          color: "rgba(255,255,255,0.4)", cursor: "pointer", backdropFilter: "blur(6px)",
-        }}
-      >← Exit</button>
+      <ExitBtn onClick={handleExit} />
 
       {/* Content */}
       {tab === "live" && (

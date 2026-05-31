@@ -139,28 +139,19 @@ const httpServer = createServer(async (req, res) => {
     return json(res, 200, { ok: true, name: payload.name, totalTokens });
   }
 
-  // ── Auth: login / register ────────────────────────────────────────────────
+  // ── Auth: login (existing accounts only) ──────────────────────────────────
   if (urlPath === "/auth/login" && req.method === "POST") {
     const { name, password } = await readBody(req);
     if (!name || !password) return json(res, 400, { error: "name and password required" });
 
     const nameKey = name.trim().toLowerCase();
-    const displayName = name.trim().slice(0, 32);
 
     const { rows } = await db.query(
       "SELECT * FROM race_users WHERE name_key = $1", [nameKey]
     );
 
-    if (rows.length === 0) {
-      // New user — register
-      const hash = await bcrypt.hash(password, SALT_ROUNDS);
-      await db.query(
-        "INSERT INTO race_users (name_key, display_name, password_hash) VALUES ($1, $2, $3)",
-        [nameKey, displayName, hash]
-      );
-      const token = jwt.sign({ name: displayName }, JWT_SECRET, { expiresIn: "7d" });
-      return json(res, 200, { token, mustChangePassword: false, displayName });
-    }
+    // Login does NOT create accounts — unknown name is rejected.
+    if (rows.length === 0) return json(res, 404, { error: "Account not found — register first" });
 
     const user = rows[0];
     const match = await bcrypt.compare(password, user.password_hash);
@@ -172,6 +163,29 @@ const httpServer = createServer(async (req, res) => {
       mustChangePassword: user.must_change_password,
       displayName: user.display_name,
     });
+  }
+
+  // ── Auth: register (create a new account) ─────────────────────────────────
+  if (urlPath === "/auth/register" && req.method === "POST") {
+    const { name, password } = await readBody(req);
+    if (!name || !password) return json(res, 400, { error: "name and password required" });
+    if (password.length < 4) return json(res, 400, { error: "Password must be at least 4 characters" });
+
+    const nameKey = name.trim().toLowerCase();
+    const displayName = name.trim().slice(0, 32);
+
+    const { rows } = await db.query(
+      "SELECT 1 FROM race_users WHERE name_key = $1", [nameKey]
+    );
+    if (rows.length > 0) return json(res, 409, { error: "Name already taken" });
+
+    const hash = await bcrypt.hash(password, SALT_ROUNDS);
+    await db.query(
+      "INSERT INTO race_users (name_key, display_name, password_hash) VALUES ($1, $2, $3)",
+      [nameKey, displayName, hash]
+    );
+    const token = jwt.sign({ name: displayName }, JWT_SECRET, { expiresIn: "7d" });
+    return json(res, 200, { token, mustChangePassword: false, displayName });
   }
 
   // ── Auth: change password ─────────────────────────────────────────────────
