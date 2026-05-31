@@ -357,4 +357,96 @@
   border-color: rgba(255, 255, 255, 0.12) !important;
 }
 
+/* ── /live spectator screen ────────────────────────────────────────────────── */
+
+/* Hide the OS cursor everywhere inside the spectator screen; the custom one
+   below replaces it. Re-enable a pointer over real buttons for affordance. */
+.live-screen, .live-screen * { cursor: none !important; }
+.live-screen button, .live-screen a { cursor: none !important; }
+
+/* Custom cursor: an outer glowing ring + inner dot, positioned from JS via
+   the --cx / --cy CSS variables. pointer-events:none so it never blocks clicks.
+   The ring trails the dot slightly (slower transition) for a fluid feel. */
+.live-cursor-dot,
+.live-cursor-ring {
+  position: fixed;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 9999;
+  border-radius: 50%;
+  transform: translate(calc(var(--cx, -100px) - 50%), calc(var(--cy, -100px) - 50%));
+  will-change: transform;
+}
+.live-cursor-dot {
+  width: 7px;
+  height: 7px;
+  background: #4affe0;
+  box-shadow: 0 0 8px 2px rgba(74, 255, 224, 0.9), 0 0 18px 4px rgba(45, 212, 255, 0.5);
+  transition: transform 0.03s linear;
+}
+.live-cursor-ring {
+  width: 34px;
+  height: 34px;
+  border: 1.5px solid rgba(74, 255, 224, 0.55);
+  box-shadow: 0 0 14px rgba(0, 240, 200, 0.35), inset 0 0 10px rgba(0, 240, 200, 0.15);
+  transition: transform 0.12s cubic-bezier(0.22, 1, 0.36, 1), width 0.2s ease, height 0.2s ease, border-color 0.2s ease;
+  animation: live-cursor-spin 6s linear infinite;
+}
+/* Grow + brighten the ring when hovering an interactive element. */
+.live-cursor-ring.is-active {
+  width: 50px;
+  height: 50px;
+  border-color: rgba(74, 255, 224, 0.95);
+  box-shadow: 0 0 22px rgba(0, 240, 200, 0.6), inset 0 0 14px rgba(0, 240, 200, 0.3);
+}
+@keyframes live-cursor-spin {
+  to { transform: translate(calc(var(--cx, -100px) - 50%), calc(var(--cy, -100px) - 50%)) rotate(360deg); }
+}
+/* When active the spin keyframe would override the larger size via transform;
+   keep the translate but let JS-driven size win by disabling spin on hover. */
+.live-cursor-ring.is-active { animation: none; }
+
+/* Big projector title overlay — sits along the top, glitch-styled, non-blocking. */
+.live-title-wrap {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding-top: clamp(0.6rem, 2vh, 1.4rem);
+  pointer-events: none;
+  z-index: 70;
+}
+.live-title {
+  font-size: clamp(1rem, 2.3vw, 1.75rem);
+  letter-spacing: 0.14em;
+  text-align: center;
+  /* keep the last letter's tracking from pushing the glyph off-centre */
+  text-indent: 0.14em;
+  white-space: nowrap;
+  line-height: 1.1;
+}
+/* The shared .glitch-title paints an opaque dark slab in its ::before/::after
+   layers (fine on the full-screen splash). Over the live race that slab looks
+   like an ugly band — make the glitch layers transparent so only the coloured
+   RGB-split text shows, and clip them to the text box. */
+.live-title::before,
+.live-title::after {
+  background: transparent;
+}
+.live-title-sub {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: clamp(0.5rem, 1.1vw, 0.7rem);
+  font-weight: 800;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  text-transform: uppercase;
+  color: rgba(190, 255, 245, 0.45);
+  text-align: center;
+}
+
 

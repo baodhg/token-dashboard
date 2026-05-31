@@ -810,6 +810,14 @@ function createGalaxy() {
 // wind-down is always a smooth throttle-down rather than a hard cut.
 const BURST_FRAMES = 150;
 
+// Minimum real token gain (between two polls) that counts as a "surge" and fires
+// the afterburner. Absolute, NOT relative to the leader's total — a relative
+// threshold (newMax * 0.0005) scales with the period window, so on 3d/1w/1m the
+// cumulative totals get large enough that a normal poll's gain never clears the
+// bar and the cars stop bursting. A flat floor keeps the effect consistent
+// across every period.
+const SURGE_MIN_TOKENS = 50;
+
 function createRockets() {
   let W = 0, H = 0, destX = 0;
   let rockets: any[] = [];
@@ -1032,7 +1040,7 @@ function createRockets() {
         // Real growth (not rounding noise). Refill the burst to full so it
         // sustains all the way to (and across) the next sync — keeps the plasma
         // continuous if tokens keep arriving every poll.
-        const grew = old && gained > Math.max(1, newMax * 0.0005);
+        const grew = old && gained >= SURGE_MIN_TOKENS;
         const burstTimer = grew
           ? BURST_FRAMES
           : old ? Math.max(0, old.burstTimer || 0) : 0;

@@ -18,6 +18,13 @@ interface MultiplayerRaceProps {
   /** Current player's totalTokens — caller keeps fetching and passes it in. */
   myTokens: number;
   onExit?: () => void;
+  /**
+   * Spectator (projector) mode: the machine is only displaying the race, not
+   * competing. There is no "me", so the bottom self badge is hidden and no
+   * player is highlighted. The caller also skips /api/sync entirely in this
+   * mode, so this machine never reports a total of its own.
+   */
+  spectator?: boolean;
 }
 
 // ── Shared math / color helpers (duplicated from ModelRace to keep files independent) ─
@@ -213,6 +220,14 @@ function createGalaxy() {
 // ── Player rocket engine ──────────────────────────────────────────────────────
 const BURST_FRAMES = 150;
 
+// Minimum real token gain (between two polls) that counts as a "surge" and fires
+// the afterburner. Absolute, NOT relative to the leader's total — a relative
+// threshold (newMax * 0.0005) scales with whoever is in the lead, so once one
+// racer's cumulative total is large, smaller racers' normal gains never clear
+// the bar and only the leader's rocket bursts. A flat floor keeps every racer's
+// afterburner firing on real gains regardless of the leader's size.
+const SURGE_MIN_TOKENS = 50;
+
 // Seconds an up/down rank change keeps flashing before settling back to "same"
 const TREND_HOLD_S = 2.5;
 
@@ -281,17 +296,34 @@ function createPlayerRockets() {
   }
 
   function plumeCone(ctx: CanvasRenderingContext2D, length: number, halfW: number, sway: number, t: number, seed: number, freq: number) {
-    const seg = 10; ctx.beginPath(); ctx.moveTo(0, -halfW);
+    // Width profile: NARROW at the throat (x=0) so the plume erupts from a tight
+    // engine mouth that the ship's nozzle covers — no flame spilling past the
+    // hull sides — then bulges open and tapers to a point at the tail. This is
+    // both more realistic and fixes the "gap" where a wide-at-origin cone poked
+    // out beyond the nozzle face.
+    // Throat must keep the WIDEST flame layer (haze, halfW = wid*2.3) within the
+    // ship's nozzle half-height even at full burst, or the plume spills past the
+    // hull. Worst case wid≈22 → 22*2.3*0.18 ≈ 9.3, under NOZZLE_H (11). At cruise
+    // it reads as a tight high-pressure jet.
+    const THROAT = 0.18; // width at x=0 as a fraction of halfW
+    const widthAt = (u: number) => {
+      // bulge: rises from THROAT to 1.0 around u≈0.3, then tapers toward 0.
+      const open = THROAT + (1 - THROAT) * Math.sin(Math.min(u / 0.3, 1) * (Math.PI / 2));
+      const tail = 1 - Math.pow(u, 1.4); // smooth taper to the tail tip
+      return halfW * open * tail;
+    };
+    const seg = 12; ctx.beginPath();
+    ctx.moveTo(0, -widthAt(0));
     for (let i = 0; i <= seg; i++) {
-      const u = i / seg; const x = -u * length; const taper = 1 - u;
-      const wob = Math.sin(t * 1.6 + u * 6 * freq + seed) * halfW * 0.22 * u;
-      ctx.lineTo(x, -halfW * taper + wob + sway * u);
+      const u = i / seg; const x = -u * length; const w = widthAt(u);
+      const wob = Math.sin(t * 1.6 + u * 6 * freq + seed) * halfW * 0.18 * u;
+      ctx.lineTo(x, -w + wob + sway * u);
     }
     ctx.lineTo(-length, sway);
     for (let i = seg; i >= 0; i--) {
-      const u = i / seg; const x = -u * length; const taper = 1 - u;
-      const wob = Math.sin(t * 1.6 + u * 6 * freq + seed + 2) * halfW * 0.22 * u;
-      ctx.lineTo(x, halfW * taper + wob + sway * u);
+      const u = i / seg; const x = -u * length; const w = widthAt(u);
+      const wob = Math.sin(t * 1.6 + u * 6 * freq + seed + 2) * halfW * 0.18 * u;
+      ctx.lineTo(x, w + wob + sway * u);
     }
     ctx.closePath(); ctx.fill();
   }
@@ -327,33 +359,102 @@ function createPlayerRockets() {
     ctx.restore();
   }
 
-  // Rocket: render player as a colored capsule with their initial
-  function drawRocketBody(ctx: CanvasRenderingContext2D, color: string, name: string, isMe: boolean) {
-    const R = isMe ? 28 : 22;
-    // Body
+  // Rocket: render player as an aggressive CYBER battlecruiser — a heavy,
+  // hard-edged hull with armored plating, twin neon strakes, a flat engine
+  // NOZZLE that meets the flame, big swept wings, and a hot energy core.
+  // Faces +x. The exhaust nozzle is a flat face at x≈0 (the flame origin), so
+  // the plume erupts straight out of the engine — no gap. The name lives in the
+  // HUD label, so no letter is drawn.
+  function drawRocketBody(ctx: CanvasRenderingContext2D, color: string, _name: string, isMe: boolean) {
+    const R = isMe ? 30 : 24;
     ctx.save();
     ctx.scale(R / 22, R / 22);
-    const body = ctx.createLinearGradient(0, -11, 0, 11);
-    body.addColorStop(0, shade(color, 60)); body.addColorStop(0.3, color);
-    body.addColorStop(0.6, shade(color, -20)); body.addColorStop(1, shade(color, -40));
-    ctx.fillStyle = body;
+    ctx.lineJoin = "miter";
+    ctx.miterLimit = 8;
+
+    const neon = shade(color, 95);
+    const dark = shade(color, -58);
+    const NOZZLE_H = 11; // half-height of the flat engine face at the tail (x=0); must cover the flame throat
+
+    // Hull silhouette — heavy dart with a FLAT tail nozzle (x=0) meeting the
+    // flame, stepped armor shoulders, and a long sharp nose (x=50).
+    const hull = (c: CanvasRenderingContext2D) => {
+      c.beginPath();
+      c.moveTo(50, 0);              // nose tip
+      c.lineTo(30, -6);             // nose shoulder (upper)
+      c.lineTo(24, -11);            // armor step out (upper)
+      c.lineTo(13, -13);            // wide mid hull (upper)
+      c.lineTo(4, -NOZZLE_H);       // slight vault into the nozzle (upper)
+      c.lineTo(0, -NOZZLE_H);       // FLAT nozzle top
+      c.lineTo(0, NOZZLE_H);        // FLAT nozzle bottom
+      c.lineTo(4, NOZZLE_H);        // slight vault into the nozzle (lower)
+      c.lineTo(13, 13);             // wide mid hull (lower)
+      c.lineTo(24, 11);             // armor step out (lower)
+      c.lineTo(30, 6);              // nose shoulder (lower)
+      c.closePath();
+    };
+
+    // ── Big swept wings (behind hull), aggressive rake ───────────────────────
+    ctx.fillStyle = dark;
+    ctx.strokeStyle = neon; ctx.lineWidth = 1.2;
+    ctx.shadowColor = color; ctx.shadowBlur = isMe ? 6 : 4;
+    // top wing
     ctx.beginPath();
-    ctx.moveTo(-18, -11); ctx.lineTo(14, -11);
-    ctx.quadraticCurveTo(22, 0, 14, 11); ctx.lineTo(-18, 11);
-    ctx.quadraticCurveTo(-22, 0, -18, -11); ctx.closePath(); ctx.fill();
-    // "Me" indicator
-    if (isMe) {
-      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(-18, -11); ctx.lineTo(14, -11);
-      ctx.quadraticCurveTo(22, 0, 14, 11); ctx.lineTo(-18, 11);
-      ctx.quadraticCurveTo(-22, 0, -18, -11); ctx.closePath(); ctx.stroke();
-    }
-    // Initial letter
+    ctx.moveTo(20, -9); ctx.lineTo(10, -28); ctx.lineTo(0, -26); ctx.lineTo(2, -11); ctx.lineTo(8, -10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // bottom wing
+    ctx.beginPath();
+    ctx.moveTo(20, 9); ctx.lineTo(10, 28); ctx.lineTo(0, 26); ctx.lineTo(2, 11); ctx.lineTo(8, 10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // ── Hull fill: dark armored metal, bright energized leading edge ─────────
+    const body = ctx.createLinearGradient(0, 0, 50, 0);
+    body.addColorStop(0, shade(color, -60));
+    body.addColorStop(0.45, shade(color, -25));
+    body.addColorStop(0.8, color);
+    body.addColorStop(1, neon);
+    ctx.fillStyle = body;
+    hull(ctx); ctx.fill();
+
+    // ── Armor plate shading — a darker belly wedge for volume ────────────────
+    ctx.globalAlpha = 0.4; ctx.fillStyle = shade(color, -70);
+    ctx.beginPath();
+    ctx.moveTo(0, NOZZLE_H); ctx.lineTo(13, 13); ctx.lineTo(24, 11); ctx.lineTo(30, 6);
+    ctx.lineTo(30, 2); ctx.lineTo(6, 3); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // ── Twin neon strakes running the length of the hull ─────────────────────
+    ctx.strokeStyle = neon; ctx.lineWidth = 1.4;
+    ctx.shadowColor = color; ctx.shadowBlur = 5;
+    ctx.beginPath(); ctx.moveTo(7, -5); ctx.lineTo(30, -3.5); ctx.lineTo(44, 0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(7, 5); ctx.lineTo(30, 3.5); ctx.lineTo(44, 0); ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // ── Engine vents — glowing slits on the nozzle face ──────────────────────
+    ctx.strokeStyle = "#ffffff"; ctx.globalAlpha = 0.85; ctx.lineWidth = 1.6;
+    ctx.shadowColor = color; ctx.shadowBlur = 6;
+    ctx.beginPath(); ctx.moveTo(1, -NOZZLE_H + 2); ctx.lineTo(1, NOZZLE_H - 2); ctx.stroke();
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+
+    // ── Heavy hull outline — white+glow for "me", neon for others ────────────
+    ctx.shadowColor = color;
+    ctx.shadowBlur = isMe ? 12 : 8;
+    ctx.strokeStyle = isMe ? "#ffffff" : neon;
+    ctx.lineWidth = isMe ? 2.2 : 1.6;
+    hull(ctx); ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // ── Energy core — hot glowing reactor eye ────────────────────────────────
+    const core = ctx.createRadialGradient(28, 0, 0, 28, 0, 7);
+    core.addColorStop(0, "#ffffff");
+    core.addColorStop(0.4, neon);
+    core.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(28, 0, 6, 0, TAU); ctx.fill();
     ctx.fillStyle = "#ffffff";
-    ctx.font = `bold ${isMe ? 11 : 9}px ui-monospace, monospace`;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText((name[0] || "?").toUpperCase(), -2, 0);
+    ctx.beginPath(); ctx.arc(28, 0, 1.8, 0, TAU); ctx.fill();
+
     ctx.restore();
   }
 
@@ -365,7 +466,7 @@ function createPlayerRockets() {
         const old = prev.get(p.name);
         const prevTokens = old ? old.totalTokens : p.totalTokens;
         const gained = p.totalTokens - prevTokens;
-        const grew = !!old && gained > Math.max(1, newMax * 0.0005);
+        const grew = !!old && gained >= SURGE_MIN_TOKENS;
         const burstTimer = grew ? BURST_FRAMES : old ? Math.max(0, old.burstTimer || 0) : 0;
         const oldRank = old ? old.rank : i;
         // Carry over the existing trend; only refresh it (and its expiry) on an
@@ -395,7 +496,11 @@ function createPlayerRockets() {
       clock = t;
       const n = rockets.length;
       if (!n) return [];
-      const topPad = 84, botPad = 54;
+      // topPad clears the header stack (title + sub + tab switcher) so the top
+      // lane never sits under it; botPad leaves room for the bottom badge. Lanes
+      // are distributed evenly across the usable band, so any player count up to
+      // the 10-slot cap auto-compresses to fit without overflowing.
+      const topPad = 132, botPad = 56;
       const usable = H - topPad - botPad;
       const laneAt = (i: number) => topPad + usable * ((i + 0.5) / n);
       const startX = 90, finishX = W - 360;
@@ -506,7 +611,7 @@ function CountUp({ value, className, style }: { value: number; className?: strin
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExit }: MultiplayerRaceProps) {
+export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExit, spectator = false }: MultiplayerRaceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const labelRefs = useRef<(HTMLDivElement | null)[]>([]);
   const trendRefs = useRef<(HTMLSpanElement | null)[]>([]);
@@ -602,7 +707,7 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
       positions.forEach((p: any, i: number) => {
         const el = labelRefs.current[i];
         if (el) {
-          el.style.transform = `translate(${p.x + 38}px, ${p.y - 22}px)`;
+          el.style.transform = `translate(${p.x + 76}px, ${p.y - 22}px)`;
           el.style.opacity = "1";
         }
         const arrow = trendRefs.current[i];
@@ -708,36 +813,40 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
         {connected ? `${players.length} racer${players.length !== 1 ? "s" : ""}` : "connecting…"}
       </div>
 
-      {/* Me badge */}
-      <div style={{
-        position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)",
-        background: "rgba(0,0,0,0.55)", border: `1px solid ${hexA(getColor(playerName), 0.5)}`,
-        borderRadius: 20, padding: "4px 14px",
-        fontFamily: "ui-monospace, monospace", fontSize: 11, fontWeight: 700,
-        color: getColor(playerName),
-        backdropFilter: "blur(8px)",
-        boxShadow: `0 0 12px ${hexA(getColor(playerName), 0.25)}`,
-      }}>
-        ★ {playerName} — <CountUp value={myTokens} style={{ fontVariantNumeric: "tabular-nums" }} /> tokens
-      </div>
-
-      {/* Exit button */}
-      <button
-        onClick={onExit}
-        style={{
-          position: "absolute", top: 16, left: 16,
-          background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.15)",
-          borderRadius: 20, padding: "5px 14px",
+      {/* Me badge — hidden in spectator (projector) mode: there is no "me". */}
+      {!spectator && (
+        <div style={{
+          position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)",
+          background: "rgba(0,0,0,0.55)", border: `1px solid ${hexA(getColor(playerName), 0.5)}`,
+          borderRadius: 20, padding: "4px 14px",
           fontFamily: "ui-monospace, monospace", fontSize: 11, fontWeight: 700,
-          color: "rgba(255,255,255,0.55)", cursor: "pointer",
-          backdropFilter: "blur(6px)",
-          transition: "color 0.2s, border-color 0.2s",
-        }}
-        onMouseEnter={(e) => { (e.target as HTMLElement).style.color = "#fff"; }}
-        onMouseLeave={(e) => { (e.target as HTMLElement).style.color = "rgba(255,255,255,0.55)"; }}
-      >
-        ← Exit
-      </button>
+          color: getColor(playerName),
+          backdropFilter: "blur(8px)",
+          boxShadow: `0 0 12px ${hexA(getColor(playerName), 0.25)}`,
+        }}>
+          ★ {playerName} — <CountUp value={myTokens} style={{ fontVariantNumeric: "tabular-nums" }} /> tokens
+        </div>
+      )}
+
+      {/* Exit button — hidden on a standalone projector screen (no onExit). */}
+      {onExit && (
+        <button
+          onClick={onExit}
+          style={{
+            position: "absolute", top: 16, left: 16,
+            background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 20, padding: "5px 14px",
+            fontFamily: "ui-monospace, monospace", fontSize: 11, fontWeight: 700,
+            color: "rgba(255,255,255,0.55)", cursor: "pointer",
+            backdropFilter: "blur(6px)",
+            transition: "color 0.2s, border-color 0.2s",
+          }}
+          onMouseEnter={(e) => { (e.target as HTMLElement).style.color = "#fff"; }}
+          onMouseLeave={(e) => { (e.target as HTMLElement).style.color = "rgba(255,255,255,0.55)"; }}
+        >
+          ← Exit
+        </button>
+      )}
     </div>
   );
 }
