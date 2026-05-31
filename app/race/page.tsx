@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useCallback, Suspense, CSSProperties, useRef } from "react";
 import dynamic from "next/dynamic";
@@ -80,9 +80,9 @@ function RaceSplash({ fading }: { fading: boolean }) {
   return (
     <div className={`race-splash${fading ? " race-splash-fade" : ""}`}>
       <h1 className="glitch-title" data-text="TOKEN RACE">TOKEN RACE</h1>
-      <div className="race-splash-sub">Multiplayer Â· Token Velocity Â· Global</div>
+      <div className="race-splash-sub">Multiplayer · Token Velocity · Global</div>
       <div className="race-splash-bar"><span /></div>
-      <div className="race-splash-sub" style={{ opacity: 0.6 }}>Connecting to race serverâ€¦</div>
+      <div className="race-splash-sub" style={{ opacity: 0.6 }}>Connecting to race server…</div>
     </div>
   );
 }
@@ -98,52 +98,52 @@ function Scanlines() {
   );
 }
 
-// ── Auth Gate: login / register ───────────────────────────────────────────────
-function AuthGate({ serverUrl, onAuth }: { serverUrl: string; onAuth: (s: Session) => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [name, setName] = useState("");
+// ── Auth Gate: VIEW gate, locked to this machine's .env racer ─────────────────
+// Identity is the machine's .env RACE_PLAYER_NAME (the actual racer). This gate
+// only guards *viewing* /race: the name is pre-filled + locked to machineName,
+// the user just enters the password, and login must succeed against the race
+// server for that exact name. No register tab — the server-side reporter
+// bootstraps the account on first sync.
+function AuthGate({ serverUrl, machineName, onAuth }: {
+  serverUrl: string; machineName: string; onAuth: (s: Session) => void;
+}) {
   const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const switchMode = (m: "login" | "register") => {
-    setMode(m); setError(""); setPassword(""); setConfirm("");
+  const tryLogin = async (name: string, p: string) => {
+    const res = await fetch(`${serverUrl}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, password: p }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
   };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const n = name.trim().slice(0, 32);
+    const name = machineName.trim();
     const p = password;
-    if (!n || !p) return;
-    if (mode === "register") {
-      if (p.length < 4) { setError("Password must be at least 4 characters"); return; }
-      if (p !== confirm) { setError("Passwords do not match"); return; }
-      if (p === DEFAULT_PW) { setError(`Password cannot be "${DEFAULT_PW}"`); return; }
-    }
+    if (!name || !p) return;
     setLoading(true); setError("");
     try {
-      // Login and register are separate endpoints: /auth/login only accepts
-      // existing accounts, /auth/register creates a new one.
-      const endpoint = mode === "register" ? "/auth/register" : "/auth/login";
-      const res = await fetch(`${serverUrl}${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: n, password: p }),
-      });
-      const data = await res.json();
+      let { res, data } = await tryLogin(name, p);
+      // Bootstrap race: a brand-new machine's account is registered by the
+      // server-side reporter on first sync (fire-and-forget). If login 404s,
+      // wait once for that to land, then retry.
+      if (res.status === 404) {
+        await new Promise((r) => setTimeout(r, 1500));
+        ({ res, data } = await tryLogin(name, p));
+      }
       if (!res.ok) {
-        if (mode === "register" && res.status === 409) {
-          setError("Name already taken — please log in or choose another name");
-        } else if (mode === "login" && res.status === 404) {
-          setError("Account not found — switch to Register to create it");
-        } else {
-          setError(data.error || "Failed");
-        }
+        if (res.status === 404) setError(`Account "${name}" isn't ready yet — wait for a sync, then try again.`);
+        else if (res.status === 401) setError("Incorrect password.");
+        else setError(data.error || "Login failed");
         return;
       }
       if (data.mustChangePassword) {
-        sessionStorage.setItem(SESSION_KEY + "_pending", JSON.stringify({ displayName: data.displayName, token: data.token, name: n }));
+        sessionStorage.setItem(SESSION_KEY + "_pending", JSON.stringify({ displayName: data.displayName, token: data.token, name }));
         setError("__must_change__");
         return;
       }
@@ -156,16 +156,6 @@ function AuthGate({ serverUrl, onAuth }: { serverUrl: string; onAuth: (s: Sessio
 
   if (error === "__must_change__") return null;
 
-  const isLogin = mode === "login";
-  const TAB_S = (active: boolean): CSSProperties => ({
-    flex: 1, padding: "8px 0", fontFamily: "ui-monospace, monospace",
-    fontSize: 11, fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase",
-    background: active ? "rgba(0,255,200,0.12)" : "transparent",
-    border: "none", borderBottom: `2px solid ${active ? "rgba(0,255,200,0.6)" : "rgba(255,255,255,0.08)"}`,
-    color: active ? "#4affe0" : "rgba(255,255,255,0.25)",
-    cursor: "pointer", transition: "all 0.2s",
-  });
-
   return (
     <div style={{
       position: "fixed", inset: 0, background: "radial-gradient(ellipse at center, #0a0d1c 0%, #03040a 70%)",
@@ -173,60 +163,56 @@ function AuthGate({ serverUrl, onAuth }: { serverUrl: string; onAuth: (s: Sessio
     }}>
       <Scanlines />
       <h1 className="glitch-title" data-text="TOKEN RACE" style={{ marginBottom: "0.2rem" }}>TOKEN RACE</h1>
-      <div className="race-splash-sub" style={{ marginBottom: "0.4rem" }}>Multiplayer Â· Token Velocity Â· Global</div>
+      <div className="race-splash-sub" style={{ marginBottom: "0.4rem" }}>Multiplayer · Token Velocity · Global</div>
 
       <div style={{ width: 280, zIndex: 1 }}>
-        {/* Login / Register tabs */}
-        <div style={{ display: "flex", marginBottom: "1.2rem" }}>
-          <button style={TAB_S(isLogin)} onClick={() => switchMode("login")}>Login</button>
-          <button style={TAB_S(!isLogin)} onClick={() => switchMode("register")}>Register</button>
-        </div>
-
-        <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "0.65rem" }}>
-          <input
-            autoFocus
-            value={name} onChange={(e) => setName(e.target.value)}
-            placeholder="Racer name" maxLength={32}
-            style={{ ...INPUT_STYLE, width: "100%", boxSizing: "border-box" }}
-          />
-          <input
-            type="password"
-            value={password} onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password"
-            style={{ ...INPUT_STYLE, width: "100%", boxSizing: "border-box" }}
-          />
-          {!isLogin && (
-            <input
-              type="password"
-              value={confirm} onChange={(e) => setConfirm(e.target.value)}
-              placeholder="Confirm password"
-              style={{ ...INPUT_STYLE, width: "100%", boxSizing: "border-box" }}
-            />
-          )}
-          {error && <div style={{ ...ERR_STYLE, width: "100%", boxSizing: "border-box" }}>{error}</div>}
-          <CyberBtn
-            type="submit"
-            disabled={!name.trim() || !password || (!isLogin && !confirm) || loading}
-          >
-            {loading ? "â€¦" : isLogin ? "Login â†’" : "Create Account â†’"}
-          </CyberBtn>
-        </form>
-
-        <p style={{
-          fontFamily: "ui-monospace, monospace", fontSize: "0.6rem",
-          color: "rgba(190,255,245,0.25)", textAlign: "center",
-          marginTop: "1rem", lineHeight: 1.6,
-        }}>
-          {isLogin
-            ? "No account? Switch to Register above."
-            : "Your token count is read from your local dashboard and reported to the race server."}
-        </p>
+        {machineName ? (
+          <>
+            <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "0.65rem" }}>
+              {/* Name is locked to this machine's racer — view only */}
+              <input
+                value={machineName}
+                readOnly
+                aria-label="Racer name (locked to this machine)"
+                style={{
+                  ...INPUT_STYLE, width: "100%", boxSizing: "border-box",
+                  opacity: 0.55, cursor: "not-allowed",
+                }}
+              />
+              <input
+                autoFocus
+                type="password"
+                value={password} onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                style={{ ...INPUT_STYLE, width: "100%", boxSizing: "border-box" }}
+              />
+              {error && <div style={{ ...ERR_STYLE, width: "100%", boxSizing: "border-box" }}>{error}</div>}
+              <CyberBtn type="submit" disabled={!password || loading}>
+                {loading ? "…" : "Enter Race →"}
+              </CyberBtn>
+            </form>
+            <p style={{
+              fontFamily: "ui-monospace, monospace", fontSize: "0.6rem",
+              color: "rgba(190,255,245,0.25)", textAlign: "center",
+              marginTop: "1rem", lineHeight: 1.6,
+            }}>
+              This machine races as <strong style={{ color: "rgba(0,240,200,0.55)" }}>{machineName}</strong>.
+              Enter its password to view the live race.
+            </p>
+          </>
+        ) : (
+          <p style={{
+            fontFamily: "ui-monospace, monospace", fontSize: "0.7rem",
+            color: "rgba(255,255,255,0.4)", textAlign: "center", lineHeight: 1.7,
+          }}>
+            This machine has no <code style={{ color: "#4affe0" }}>RACE_PLAYER_NAME</code> configured.<br />
+            Set it in <code style={{ color: "#4affe0" }}>.env</code> to join the race.
+          </p>
+        )}
       </div>
     </div>
   );
 }
-
-const DEFAULT_PW = "123456";
 
 // ── Change Password Gate ──────────────────────────────────────────────────────
 function ChangePasswordGate({ serverUrl, pendingName, onDone }: {
@@ -270,7 +256,7 @@ function ChangePasswordGate({ serverUrl, pendingName, onDone }: {
         CHANGE PASSWORD
       </h1>
       <div className="race-splash-sub" style={{ color: "#ff9f59" }}>
-        Your password was reset â€” choose a new one to continue
+        Your password was reset — choose a new one to continue
       </div>
       <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem", zIndex: 1 }}>
         <input
@@ -293,7 +279,7 @@ function ChangePasswordGate({ serverUrl, pendingName, onDone }: {
         />
         {error && <div style={ERR_STYLE}>{error}</div>}
         <CyberBtn type="submit" disabled={!oldPw || !newPw || !confirm || loading}>
-          {loading ? "â€¦" : "Set Password â†’"}
+          {loading ? "…" : "Set Password →"}
         </CyberBtn>
       </form>
     </div>
@@ -327,7 +313,7 @@ function RaceContent() {
   const searchParams = useSearchParams();
 
   const initialSource = searchParams.get("source") || "all";
-  // Spectator (projector) mode: ?spectator=1 â€” this machine only displays the
+  // Spectator (projector) mode: ?spectator=1 — this machine only displays the
   // race. It does NOT call /api/sync (so it scans no local logs and never
   // reports a total of its own), and it skips the auth gate entirely. All
   // player data is read client-side from the race server via GET /live.
@@ -336,6 +322,9 @@ function RaceContent() {
   const [source] = useState(initialSource);
   const [myTokens, setMyTokens] = useState(0);
   const [lastRefresh, setLastRefresh] = useState<number | null>(null);
+  // This machine's racer identity from .env (via /api/sync). Drives the login
+  // gate's locked name + the "me" badge. Empty until the first sync responds.
+  const [machineName, setMachineName] = useState("");
 
   // Auth state
   const [session, setSession] = useState<Session | null>(null);
@@ -370,7 +359,7 @@ function RaceContent() {
   }, []);
 
   // Poll the local DB (via /api/sync) every 10s to refresh my token total for
-  // the UI badge. /api/sync scans local logs â†’ DB and reports up to the race
+  // the UI badge. /api/sync scans local logs → DB and reports up to the race
   // server, returning the current totalTokens. Runs immediately on mount, then
   // on POLL_MS interval; the interval is cleared on unmount.
   useEffect(() => {
@@ -379,13 +368,18 @@ function RaceContent() {
     if (spectator) return;
     let alive = true;
     const pollDb = () => {
+      // Reporting is server-side via .env identity (race-reporter), so no token
+      // is sent here. We DO read back `playerName` (the machine's .env racer
+      // name) to drive the login gate's locked name field and the "me" badge.
       fetch("/api/sync", { method: "POST" })
         .then((r) => r.json())
         .then((d) => {
-          if (alive && typeof d?.totalTokens === "number") {
+          if (!alive) return;
+          if (typeof d?.totalTokens === "number") {
             setMyTokens(d.totalTokens);
             setLastRefresh(Date.now());
           }
+          if (typeof d?.playerName === "string") setMachineName(d.playerName);
         })
         .catch(() => {});
     };
@@ -458,6 +452,7 @@ function RaceContent() {
     return (
       <AuthGate
         serverUrl={RACE_SERVER_URL}
+        machineName={machineName}
         onAuth={(s) => {
           // Check if mustChangePassword triggered pending state
           const pending = sessionStorage.getItem(SESSION_KEY + "_pending");
@@ -474,6 +469,7 @@ function RaceContent() {
     <RaceShell
       session={session}
       serverUrl={RACE_SERVER_URL}
+      machineName={machineName}
       myTokens={myTokens}
       lastRefresh={lastRefresh}
       handleExit={handleExit}
@@ -504,13 +500,13 @@ function ExitBtn({ onClick }: { onClick: () => void }) {
         transition: "all 0.2s",
       }}
     >
-      <span style={{ display: "inline-block", transform: hover ? "translateX(-2px)" : "none", transition: "transform 0.2s" }}>â†</span>
+      <span style={{ display: "inline-block", transform: hover ? "translateX(-2px)" : "none", transition: "transform 0.2s" }}>←</span>
       Exit
     </button>
   );
 }
 
-// â”€â”€ Tab pill â€” cyan glow when active, subtle lift on hover â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Tab pill — cyan glow when active, subtle lift on hover ────────────────────
 function TabBtn({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   const [hover, setHover] = useState(false);
   const on = active || hover;
@@ -531,7 +527,7 @@ function TabBtn({ active, label, onClick }: { active: boolean; label: string; on
   );
 }
 
-// â”€â”€ Logout pill â€” first click arms a confirm prompt, second confirms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Logout pill — first click arms a confirm prompt, second confirms ──────────
 function LogoutBtn({ onClick }: { onClick: () => void }) {
   const [hover, setHover] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -598,7 +594,7 @@ function LogoutBtn({ onClick }: { onClick: () => void }) {
         transition: "all 0.2s",
       }}
     >
-      <span style={{ fontSize: 11, lineHeight: 1 }}>â»</span>
+      <span style={{ fontSize: 11, lineHeight: 1 }}>⏻</span>
       logout
     </button>
   );
@@ -607,15 +603,19 @@ function LogoutBtn({ onClick }: { onClick: () => void }) {
 // ── Race shell with tab switcher ──────────────────────────────────────────────
 type Tab = "live" | "leaderboard" | "history";
 
-function RaceShell({ session, serverUrl, myTokens, lastRefresh, handleExit, handleLogout, spectator = false }: {
+function RaceShell({ session, serverUrl, machineName = "", myTokens, lastRefresh, handleExit, handleLogout, spectator = false }: {
   session: Session;
   serverUrl: string;
+  machineName?: string;
   myTokens: number;
   lastRefresh: number | null;
   handleExit: () => void;
   handleLogout: () => void;
   spectator?: boolean;
 }) {
+  // The racer identity is the machine's .env name (fall back to the session
+  // display name, which is constrained to equal it). Empty in spectator mode.
+  const meName = machineName || session.displayName;
   const [tab, setTab] = useState<Tab>("live");
   const mono: CSSProperties = { fontFamily: "ui-monospace, monospace" };
 
@@ -628,9 +628,9 @@ function RaceShell({ session, serverUrl, myTokens, lastRefresh, handleExit, hand
         background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 24, padding: "4px 8px", backdropFilter: "blur(10px)",
       }}>
-        <TabBtn active={tab === "live"}        label="ðŸš€ Live"     onClick={() => setTab("live")} />
-        <TabBtn active={tab === "leaderboard"} label="ðŸ† All-Time" onClick={() => setTab("leaderboard")} />
-        <TabBtn active={tab === "history"}     label="ðŸ“ˆ History"  onClick={() => setTab("history")} />
+        <TabBtn active={tab === "live"}        label="🚀 Live"     onClick={() => setTab("live")} />
+        <TabBtn active={tab === "leaderboard"} label="🏆 All-Time" onClick={() => setTab("leaderboard")} />
+        <TabBtn active={tab === "history"}     label="📈 History"  onClick={() => setTab("history")} />
         {lastRefresh && tab === "live" && (
           <span style={{ ...mono, fontSize: 9, color: "rgba(255,255,255,0.18)", paddingLeft: 4 }}>
             {new Date(lastRefresh).toLocaleTimeString()}
@@ -651,8 +651,7 @@ function RaceShell({ session, serverUrl, myTokens, lastRefresh, handleExit, hand
       {tab === "live" && (
         <MultiplayerRace
           serverUrl={serverUrl}
-          playerName={session.displayName}
-          playerToken={session.token}
+          playerName={meName}
           myTokens={myTokens}
           onExit={handleExit}
           spectator={spectator}
@@ -665,7 +664,7 @@ function RaceShell({ session, serverUrl, myTokens, lastRefresh, handleExit, hand
           scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent",
         }}>
           {tab === "leaderboard" && <LeaderboardPanel serverUrl={serverUrl} />}
-          {tab === "history" && <HistoryPanel serverUrl={serverUrl} myName={session.displayName} />}
+          {tab === "history" && <HistoryPanel serverUrl={serverUrl} myName={meName} />}
         </div>
       )}
     </div>

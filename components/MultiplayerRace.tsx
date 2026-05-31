@@ -629,12 +629,18 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
     return colorMap.current.get(name)!;
   }, []);
 
-  // Memoize ranked player list with colors
+  // Memoize ranked player list with colors. Match "me" case-insensitively:
+  // the server stores display-cased names while playerName comes from .env.
   const rankedPlayers = useMemo(() => {
+    const meKey = (playerName || "").trim().toLowerCase();
     return [...players]
       .sort((a, b) => b.totalTokens - a.totalTokens)
       .slice(0, 10)
-      .map((p) => ({ ...p, color: getColor(p.name), isMe: p.name === playerName }));
+      .map((p) => ({
+        ...p,
+        color: getColor(p.name),
+        isMe: meKey !== "" && p.name.trim().toLowerCase() === meKey,
+      }));
   }, [players, playerName, getColor]);
 
   const rankedRef = useRef(rankedPlayers);

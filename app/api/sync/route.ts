@@ -74,5 +74,8 @@ export async function POST() {
     antigravity: get(antigravity),
     totalTokens,
     racePeriod,
+    // This machine's racer identity (server-side .env). The /race view gate
+    // locks its login name to this, and the "me" badge displays it.
+    playerName: process.env.RACE_PLAYER_NAME || "",
   });
 }
