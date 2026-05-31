@@ -370,23 +370,35 @@ function RaceContent() {
     setAuthReady(true);
   }, []);
 
-  // Fetch my current total once on mount / period change — just for the UI badge.
-  // The actual race reporting is done server-side by /api/sync → POST /report.
+  // Poll the local DB (via /api/sync) every 10s to refresh my token total for
+  // the UI badge. /api/sync scans local logs → DB and reports up to the race
+  // server, returning the current totalTokens. Runs immediately on mount, then
+  // on POLL_MS interval; the interval is cleared on unmount.
   useEffect(() => {
-    fetch("/api/sync", { method: "POST" })
-      .then((r) => r.json())
-      .then((d) => {
-        if (typeof d?.totalTokens === "number") {
-          setMyTokens(d.totalTokens);
-          setLastRefresh(Date.now());
-        }
-      })
-      .catch(() => {});
+    let alive = true;
+    const pollDb = () => {
+      fetch("/api/sync", { method: "POST" })
+        .then((r) => r.json())
+        .then((d) => {
+          if (alive && typeof d?.totalTokens === "number") {
+            setMyTokens(d.totalTokens);
+            setLastRefresh(Date.now());
+          }
+        })
+        .catch(() => {});
+    };
+    pollDb();
+    const id = setInterval(pollDb, POLL_MS);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+
+  // Keep the URL in sync with the current period/source (no re-fetch).
+  useEffect(() => {
     const params = new URLSearchParams({ period });
     if (source !== "all") params.set("source", source);
     router.replace(`/race?${params.toString()}`, { scroll: false });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [period, source]);
 
   const handleExit = useCallback(() => {
     const params = new URLSearchParams({ period });
