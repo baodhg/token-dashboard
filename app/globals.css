@@ -118,6 +118,14 @@
 .race-glitch {
   animation: race-glitch 4.5s steps(1, end) infinite;
 }
+
+@keyframes race-trend-pulse {
+  0%, 100% { transform: translateY(0) scale(1);   opacity: 0.95; }
+  50%      { transform: translateY(-1px) scale(1.35); opacity: 1; }
+}
+.race-trend-active {
+  animation: race-trend-pulse 0.5s ease-in-out infinite;
+}
 @keyframes race-scan {
   0%   { background-position: 0 -100%; }
   100% { background-position: 0 200%; }

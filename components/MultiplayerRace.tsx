@@ -213,11 +213,15 @@ function createGalaxy() {
 // ── Player rocket engine ──────────────────────────────────────────────────────
 const BURST_FRAMES = 150;
 
+// Seconds an up/down rank change keeps flashing before settling back to "same"
+const TREND_HOLD_S = 2.5;
+
 function createPlayerRockets() {
   let W = 0, H = 0;
   let rockets: any[] = [];
   let sparks: any[] = [];
   let maxTokens = 1;
+  let clock = 0; // accumulated seconds, advanced each frame by the render loop
 
   function emitSparks(x: number, y: number, color: string, thrust: number) {
     const n = Math.floor(1 + thrust * 4);
@@ -364,10 +368,13 @@ function createPlayerRockets() {
         const grew = !!old && gained > Math.max(1, newMax * 0.0005);
         const burstTimer = grew ? BURST_FRAMES : old ? Math.max(0, old.burstTimer || 0) : 0;
         const oldRank = old ? old.rank : i;
+        // Carry over the existing trend; only refresh it (and its expiry) on an
+        // actual rank change this update. Expiry is checked per-frame in frame().
         let trend: "up" | "down" | "same" = old ? (old.trend || "same") : "same";
-        if (old) {
-          if (i < oldRank) trend = "up";
-          else if (i > oldRank) trend = "down";
+        let trendUntil = old ? (old.trendUntil || 0) : 0;
+        if (old && i !== oldRank) {
+          trend = i < oldRank ? "up" : "down";
+          trendUntil = clock + TREND_HOLD_S;
         }
         return {
           name: p.name, totalTokens: p.totalTokens, color: p.color, isMe: p.isMe, i,
@@ -376,7 +383,8 @@ function createPlayerRockets() {
           thrust: old ? old.thrust : 0,
           burn: old ? (old.burn || 0) : 0,
           bob: old ? old.bob : rnd(0, TAU),
-          burstTimer, burstStart: grew, rank: i, prevRank: old ? old.rank : i, trend,
+          burstTimer, burstStart: grew, rank: i, prevRank: old ? old.rank : i,
+          trend, trendUntil,
           boomTimer: old ? (old.boomTimer || 0) : 0,
         };
       });
@@ -384,6 +392,7 @@ function createPlayerRockets() {
     },
     layout(w: number, h: number) { W = w; H = h; },
     frame(ctx: CanvasRenderingContext2D, t: number) {
+      clock = t;
       const n = rockets.length;
       if (!n) return [];
       const topPad = 84, botPad = 54;
@@ -459,8 +468,11 @@ function createPlayerRockets() {
         drawFlame(ctx, r.thrust, r.color, t, r.seed, boost);
         drawRocketBody(ctx, r.color, r.name, r.isMe);
         ctx.restore();
+        // Trend flashes only while inside its hold window, then settles to "same".
+        const trendActive = r.trend !== "same" && clock < r.trendUntil;
+        if (!trendActive && r.trend !== "same") r.trend = "same";
         out.push({ name: r.name, x: r.x, y, color: r.color, totalTokens: r.totalTokens,
-          isMe: r.isMe, trend: r.trend || "same" });
+          isMe: r.isMe, trend: r.trend, trendActive });
       });
       if (sparks.length > 1400) sparks = sparks.slice(-1400);
       return out;
@@ -497,6 +509,7 @@ function CountUp({ value, className, style }: { value: number; className?: strin
 export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExit }: MultiplayerRaceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const labelRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const trendRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const galaxyRef = useRef<ReturnType<typeof createGalaxy> | null>(null);
   const engineRef = useRef<ReturnType<typeof createPlayerRockets> | null>(null);
   const animRef = useRef(0);
@@ -585,12 +598,21 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
       const positions = engineRef.current!.frame(cx, t);
       t += 0.016;
 
-      // Update HUD labels
+      // Update HUD labels + rank-change arrows
       positions.forEach((p: any, i: number) => {
         const el = labelRefs.current[i];
-        if (!el) return;
-        el.style.transform = `translate(${p.x + 38}px, ${p.y - 22}px)`;
-        el.style.opacity = "1";
+        if (el) {
+          el.style.transform = `translate(${p.x + 38}px, ${p.y - 22}px)`;
+          el.style.opacity = "1";
+        }
+        const arrow = trendRefs.current[i];
+        if (arrow) {
+          const glyph = p.trend === "up" ? "▲" : p.trend === "down" ? "▼" : "▬";
+          if (arrow.textContent !== glyph) arrow.textContent = glyph;
+          arrow.style.color =
+            p.trend === "up" ? "#4ade80" : p.trend === "down" ? "#f87171" : "rgba(180,200,220,0.4)";
+          arrow.classList.toggle("race-trend-active", !!p.trendActive);
+        }
       });
       // Hide unused labels
       for (let i = positions.length; i < labelRefs.current.length; i++) {
@@ -649,13 +671,14 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
                     color: p.isMe ? "#ffffff" : "#e0e8ff", letterSpacing: "0.06em",
                     textShadow: p.isMe ? `0 0 8px ${p.color}` : "none",
                   }}>{p.name}{p.isMe ? " ★" : ""}</span>
-                  {/* trend arrow */}
-                  <span style={{ fontSize: 10, marginLeft: 2 }}>
-                    {p.totalTokens > 0 ? (
-                      rankedPlayers[i - 1]?.totalTokens === p.totalTokens ? "▬" :
-                      i === 0 ? "▲" : "▬"
-                    ) : ""}
-                  </span>
+                  {/* rank-change arrow — glyph/color/pulse driven by the frame loop */}
+                  <span
+                    ref={(el) => { trendRefs.current[i] = el; }}
+                    style={{
+                      fontSize: 10, marginLeft: 2, lineHeight: 1, display: "inline-block",
+                      color: "rgba(180,200,220,0.4)",
+                    }}
+                  >▬</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
                   <CountUp value={p.totalTokens} style={{
