@@ -12,7 +12,6 @@ const JWT_SECRET = process.env.JWT_SECRET || "change-me-in-production-" + Math.r
 const ADMIN_KEY = process.env.ADMIN_KEY || "admin123";
 const DEFAULT_PASSWORD = "123456";
 const SALT_ROUNDS = 10;
-const SNAPSHOT_INTERVAL_MS = 60_000;
 
 // ── PostgreSQL ────────────────────────────────────────────────────────────────
 if (!process.env.DATABASE_URL) {
@@ -45,37 +44,14 @@ async function initDb() {
   console.log("[db] tables ready");
 }
 
-// ── In-memory player state (updated by /report, persisted to DB every 60s) ───
-let dbSnapshot = new Map(); // name → { name, totalTokens, updatedAt }
-
-async function loadDbSnapshot() {
-  try {
-    const { rows } = await db.query(`
-      SELECT DISTINCT ON (player_name)
-        player_name AS name, total_tokens AS "totalTokens", recorded_at AS "updatedAt"
-      FROM race_snapshots
-      ORDER BY player_name, recorded_at DESC
-    `);
-    dbSnapshot = new Map(rows.map(r => [r.name, {
-      name: r.name,
-      totalTokens: Number(r.totalTokens),
-      updatedAt: new Date(r.updatedAt).getTime(),
-    }]));
-  } catch (e) { console.error("[db] loadDbSnapshot error", e.message); }
-}
-
-
-async function snapshotPlayers() {
-  if (dbSnapshot.size === 0) return;
-  // Snapshot everyone in dbSnapshot — includes players reported via /report
-  // even if they are no longer connected via WebSocket.
-  const active = [...dbSnapshot.values()];
-  const values = active.flatMap((p) => [p.name, p.totalTokens]);
-  const placeholders = active.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(", ");
-  try {
-    await db.query(`INSERT INTO race_snapshots (player_name, total_tokens) VALUES ${placeholders}`, values);
-  } catch (e) { console.error("[db] snapshot error", e.message); }
-}
+// ── State model ───────────────────────────────────────────────────────────────
+// This server keeps NO authoritative in-memory player state. Every /report is
+// written straight to race_snapshots, and every /report only ever touches the
+// row of the player it authenticated via JWT. That makes the server stateless
+// and safe to run as multiple instances against ONE shared DB: no instance can
+// ever overwrite another player's value with a stale copy (the old split-brain
+// bug, where each instance re-snapshotted its whole in-memory view every 60s).
+// Live state is derived on read as the latest row per player (see GET /live).
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 function readBody(req) {
@@ -111,15 +87,31 @@ const httpServer = createServer(async (req, res) => {
 
   // ── Health ────────────────────────────────────────────────────────────────
   if (urlPath === "/health" && req.method === "GET") {
-    return json(res, 200, { status: "ok", tracked: dbSnapshot.size });
+    return json(res, 200, { status: "ok" });
   }
 
-  // ── Live: current player state for canvas polling (no WebSocket needed) ─────
+  // ── Live: latest value per player for canvas polling (no WebSocket needed) ──
+  // Derived on read from the shared DB: DISTINCT ON picks each player's newest
+  // row, whichever instance wrote it. Backed by the
+  // race_snapshots_player_time (player_name, recorded_at DESC) index.
   if (urlPath === "/live" && req.method === "GET") {
-    const list = [...dbSnapshot.values()].map((p) => ({
-      name: p.name, totalTokens: p.totalTokens, updatedAt: p.updatedAt,
-    }));
-    return json(res, 200, { players: list });
+    try {
+      const { rows } = await db.query(`
+        SELECT DISTINCT ON (player_name)
+          player_name AS name, total_tokens AS "totalTokens", recorded_at AS "updatedAt"
+        FROM race_snapshots
+        ORDER BY player_name, recorded_at DESC
+      `);
+      const list = rows.map((r) => ({
+        name: r.name,
+        totalTokens: Number(r.totalTokens),
+        updatedAt: new Date(r.updatedAt).getTime(),
+      }));
+      return json(res, 200, { players: list });
+    } catch (e) {
+      console.error("[db] live query error", e.message);
+      return json(res, 500, { error: "DB read failed" });
+    }
   }
 
   if (urlPath === "/report" && req.method === "POST") {
@@ -131,12 +123,20 @@ const httpServer = createServer(async (req, res) => {
     if (typeof totalTokens !== "number" || !isFinite(totalTokens) || totalTokens < 0) {
       return json(res, 400, { error: "Invalid totalTokens" });
     }
-    dbSnapshot.set(payload.name, {
-      name: payload.name,
-      totalTokens: Math.floor(totalTokens),
-      updatedAt: Date.now(),
-    });
-    return json(res, 200, { ok: true, name: payload.name, totalTokens });
+    const value = Math.floor(totalTokens);
+    // Write only the authenticated player's own row — never any other player's.
+    // This is the whole anti-split-brain guarantee: stale values from other
+    // instances can't exist because no instance writes data it doesn't own.
+    try {
+      await db.query(
+        "INSERT INTO race_snapshots (player_name, total_tokens) VALUES ($1, $2)",
+        [payload.name, value]
+      );
+    } catch (e) {
+      console.error("[db] report insert error", e.message);
+      return json(res, 500, { error: "DB write failed" });
+    }
+    return json(res, 200, { ok: true, name: payload.name, totalTokens: value });
   }
 
   // ── Auth: login (existing accounts only) ──────────────────────────────────
@@ -291,12 +291,8 @@ const httpServer = createServer(async (req, res) => {
   res.writeHead(404); res.end();
 });
 
-setInterval(snapshotPlayers, SNAPSHOT_INTERVAL_MS);
-
 // ── Start ─────────────────────────────────────────────────────────────────────
 initDb().then(async () => {
-  await loadDbSnapshot();
-  console.log(`[db] loaded ${dbSnapshot.size} player snapshots`);
   httpServer.listen(PORT, () => {
     console.log(`Race server :${PORT} | Admin key: ${ADMIN_KEY}`);
     if (JWT_SECRET.startsWith("change-me-in-production-")) {
