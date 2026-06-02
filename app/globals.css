@@ -143,6 +143,78 @@
   transition: opacity 0.25s ease;
 }
 
+/* ════ Race Mode — badge surge FX (synced to the afterburner plasma) ════ */
+/* The aura strength is driven per-frame by --surge (the rocket's plasma boost,
+   0–1), set on the HUD label and inherited here, so the green glow rises and
+   fades in exact lockstep with the flame. */
+.race-mp-aura {
+  position: absolute;
+  inset: -1px;
+  border-radius: 7px;
+  pointer-events: none;
+  z-index: 0;
+  opacity: var(--surge, 0);
+  border: 1px solid rgba(74, 222, 128, 0.95);
+  background: radial-gradient(120% 120% at 50% 50%, rgba(74, 222, 128, 0.18), transparent 70%);
+  box-shadow:
+    0 0 10px 1px rgba(74, 222, 128, 0.75),
+    0 0 22px 3px rgba(34, 230, 140, 0.45),
+    inset 0 0 12px rgba(74, 222, 128, 0.5);
+  transition: opacity 90ms linear;
+}
+/* Clip the light sweep to the card's rounded box. */
+.race-mp-shineclip {
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+.race-mp-shine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 45%;
+  opacity: 0;
+  transform: translateX(-140%) skewX(-18deg);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(180, 255, 214, 0.55) 45%,
+    rgba(255, 255, 255, 0.85) 50%,
+    rgba(180, 255, 214, 0.55) 55%,
+    transparent
+  );
+}
+/* The number picks up a green energy glow that scales with the surge. The glow
+   strength rides --surge through the alpha channel only (no calc() inside a
+   color — Lightning CSS / Tailwind v4 rejects that and drops the whole rule). */
+.race-mp-num {
+  text-shadow: 0 0 9px rgb(74 222 128 / var(--surge, 0));
+  transition: text-shadow 90ms linear;
+}
+
+/* Floating "+N" gain popup: pops in, hangs, then drifts up and fades. */
+@keyframes race-mp-gain-float {
+  0%   { opacity: 0; transform: translateY(10px) scale(0.6); }
+  16%  { opacity: 1; transform: translateY(0) scale(1.18); }
+  32%  { transform: translateY(-5px) scale(1); }
+  70%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-46px) scale(1); }
+}
+.race-mp-gain {
+  font-family: var(--font-space-grotesk), ui-monospace, monospace;
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  color: #4ade80;
+  text-shadow: 0 0 10px rgba(74, 222, 128, 0.85), 0 1px 2px rgba(0, 0, 0, 0.7);
+  white-space: nowrap;
+  animation: race-mp-gain-float 1.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
 /* ════ Race Mode INTRO SPLASH — cyberpunk glitch title ════ */
 .race-splash {
   position: absolute;

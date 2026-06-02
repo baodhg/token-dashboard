@@ -12,6 +12,12 @@ const JWT_SECRET = process.env.JWT_SECRET || "change-me-in-production-" + Math.r
 const ADMIN_KEY = process.env.ADMIN_KEY || "admin123";
 const DEFAULT_PASSWORD = "123456";
 const SALT_ROUNDS = 10;
+const RACE_TZ_OFFSET_MIN = parseInt(process.env.RACE_TZ_OFFSET_MIN || "420", 10);
+function startOfLocalDay() {
+  const offsetMs = RACE_TZ_OFFSET_MIN * 60_000;
+  const localMidnight = Math.floor((Date.now() + offsetMs) / 86_400_000) * 86_400_000;
+  return new Date(localMidnight - offsetMs);
+}
 
 // ── PostgreSQL ────────────────────────────────────────────────────────────────
 if (!process.env.DATABASE_URL) {
@@ -37,6 +43,11 @@ async function initDb() {
       total_tokens BIGINT    NOT NULL,
       recorded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    -- Optional USD cost for the same window as total_tokens. Nullable: older
+    -- rows and reporters that don't send it stay NULL, and the UI just omits the
+    -- "$" when it's missing. Additive + idempotent, safe on the shared DB.
+    ALTER TABLE race_snapshots ADD COLUMN IF NOT EXISTS total_cost DOUBLE PRECISION;
 
     CREATE INDEX IF NOT EXISTS race_snapshots_player_time
       ON race_snapshots (player_name, recorded_at DESC);
@@ -94,17 +105,24 @@ const httpServer = createServer(async (req, res) => {
   // Derived on read from the shared DB: DISTINCT ON picks each player's newest
   // row, whichever instance wrote it. Backed by the
   // race_snapshots_player_time (player_name, recorded_at DESC) index.
+  // Scoped to TODAY (recorded_at >= start of the local day): a player only
+  // races once they've reported today, and every ship resets at the day
+  // boundary — players who don't report today drop off the board until they do.
   if (urlPath === "/live" && req.method === "GET") {
     try {
       const { rows } = await db.query(`
         SELECT DISTINCT ON (player_name)
-          player_name AS name, total_tokens AS "totalTokens", recorded_at AS "updatedAt"
+          player_name AS name, total_tokens AS "totalTokens",
+          total_cost AS "totalCost", recorded_at AS "updatedAt"
         FROM race_snapshots
+        WHERE recorded_at >= $1
         ORDER BY player_name, recorded_at DESC
-      `);
+      `, [startOfLocalDay()]);
       const list = rows.map((r) => ({
         name: r.name,
         totalTokens: Number(r.totalTokens),
+        // null when this player's latest report carried no cost
+        totalCost: r.totalCost == null ? null : Number(r.totalCost),
         updatedAt: new Date(r.updatedAt).getTime(),
       }));
       return json(res, 200, { players: list });
@@ -115,7 +133,7 @@ const httpServer = createServer(async (req, res) => {
   }
 
   if (urlPath === "/report" && req.method === "POST") {
-    const { token, totalTokens } = await readBody(req);
+    const { token, totalTokens, totalCost } = await readBody(req);
     let payload;
     try { payload = jwt.verify(token, JWT_SECRET); } catch {
       return json(res, 401, { error: "Invalid token" });
@@ -124,19 +142,26 @@ const httpServer = createServer(async (req, res) => {
       return json(res, 400, { error: "Invalid totalTokens" });
     }
     const value = Math.floor(totalTokens);
+    // totalCost is optional (USD). Accept a finite, non-negative number; anything
+    // else (missing, null, garbage) is stored as NULL so the column degrades
+    // gracefully rather than rejecting the whole report.
+    const cost =
+      typeof totalCost === "number" && isFinite(totalCost) && totalCost >= 0
+        ? totalCost
+        : null;
     // Write only the authenticated player's own row — never any other player's.
     // This is the whole anti-split-brain guarantee: stale values from other
     // instances can't exist because no instance writes data it doesn't own.
     try {
       await db.query(
-        "INSERT INTO race_snapshots (player_name, total_tokens) VALUES ($1, $2)",
-        [payload.name, value]
+        "INSERT INTO race_snapshots (player_name, total_tokens, total_cost) VALUES ($1, $2, $3)",
+        [payload.name, value, cost]
       );
     } catch (e) {
       console.error("[db] report insert error", e.message);
       return json(res, 500, { error: "DB write failed" });
     }
-    return json(res, 200, { ok: true, name: payload.name, totalTokens: value });
+    return json(res, 200, { ok: true, name: payload.name, totalTokens: value, totalCost: cost });
   }
 
   // ── Auth: login (existing accounts only) ──────────────────────────────────

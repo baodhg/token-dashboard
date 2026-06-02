@@ -7,6 +7,8 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from "react"
 export interface PlayerStat {
   name: string;
   totalTokens: number;
+  /** USD spent in the race window. null when the server/reporter didn't send it. */
+  totalCost?: number | null;
   updatedAt: number;
 }
 
@@ -74,6 +76,11 @@ function fmt(v: number): string {
   return v >= 1_000_000 ? `${(v / 1_000_000).toFixed(2)}M`
     : v >= 1_000 ? `${(v / 1_000).toFixed(1)}K`
     : `${Math.round(v)}`;
+}
+
+// USD: cents below $100, whole dollars above (keeps the small badge tidy).
+function fmtCost(v: number): string {
+  return v >= 100 ? `$${v.toFixed(0)}` : `$${v.toFixed(2)}`;
 }
 
 // ── Galaxy background (condensed — same logic as ModelRace) ──────────────────
@@ -484,7 +491,7 @@ function createPlayerRockets() {
           thrust: old ? old.thrust : 0,
           burn: old ? (old.burn || 0) : 0,
           bob: old ? old.bob : rnd(0, TAU),
-          burstTimer, burstStart: grew, rank: i, prevRank: old ? old.rank : i,
+          burstTimer, burstStart: grew, gain: grew ? gained : 0, rank: i, prevRank: old ? old.rank : i,
           trend, trendUntil,
           boomTimer: old ? (old.boomTimer || 0) : 0,
         };
@@ -528,6 +535,9 @@ function createPlayerRockets() {
           r.burn = Math.max(0, r.burn - 1 / 360);
         }
         const burstIntensity = r.burn;
+        // Rising edge of a surge, captured before the one-shot block below
+        // consumes r.burstStart. The HUD uses it to fire the badge pop/shine.
+        const surgeStart = r.burstStart === true;
         const cruise = 0.35 + pixelSpeed * 0.65;
         r.thrust = cruise + (1.0 - cruise) * burstIntensity;
         r.bob += 0.05;
@@ -577,7 +587,7 @@ function createPlayerRockets() {
         const trendActive = r.trend !== "same" && clock < r.trendUntil;
         if (!trendActive && r.trend !== "same") r.trend = "same";
         out.push({ name: r.name, x: r.x, y, color: r.color, totalTokens: r.totalTokens,
-          isMe: r.isMe, trend: r.trend, trendActive });
+          isMe: r.isMe, trend: r.trend, trendActive, boost, surgeStart, gain: r.gain });
       });
       if (sparks.length > 1400) sparks = sparks.slice(-1400);
       return out;
@@ -610,10 +620,37 @@ function CountUp({ value, className, style }: { value: number; className?: strin
   return <span className={className} style={style}>{fmt(display)}</span>;
 }
 
+// Punch the badge the instant a player's number jumps: a quick scale +
+// brightness pop on the whole card, plus a light sweep that streaks across it.
+// Uses the Web Animations API so it composes with the per-frame transform on the
+// outer label and self-cleans — no timers to track. The sustained green glow is
+// handled separately by --surge (see frame loop / globals.css).
+function fireSurge(card: HTMLDivElement | null) {
+  if (!card) return;
+  card.animate(
+    [
+      { transform: "scale(1)",    filter: "brightness(1)" },
+      { transform: "scale(1.13)", filter: "brightness(1.7) saturate(1.3)" },
+      { transform: "scale(1)",    filter: "brightness(1)" },
+    ],
+    { duration: 520, easing: "cubic-bezier(.2,.9,.25,1)" }
+  );
+  const shine = card.querySelector(".race-mp-shine") as HTMLElement | null;
+  shine?.animate(
+    [
+      { transform: "translateX(-140%) skewX(-18deg)", opacity: 0 },
+      { transform: "translateX(-30%) skewX(-18deg)",  opacity: 1, offset: 0.5 },
+      { transform: "translateX(140%) skewX(-18deg)",  opacity: 0 },
+    ],
+    { duration: 640, easing: "ease-out" }
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExit, spectator = false }: MultiplayerRaceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const labelRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   const trendRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const galaxyRef = useRef<ReturnType<typeof createGalaxy> | null>(null);
   const engineRef = useRef<ReturnType<typeof createPlayerRockets> | null>(null);
@@ -621,6 +658,10 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
 
   const [connected, setConnected] = useState(false);
   const [players, setPlayers] = useState<PlayerStat[]>([]);
+  // Floating "+N" gain popups — one spawned per number jump (surge), drifts up
+  // and fades. Self-removed on animation end; capped to avoid runaway growth.
+  const [floats, setFloats] = useState<Array<{ id: number; amount: number; x: number; y: number }>>([]);
+  const floatId = useRef(0);
 
   // Stable color per player name
   const colorMap = useRef(new Map<string, string>());
@@ -715,6 +756,20 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
         if (el) {
           el.style.transform = `translate(${p.x + 76}px, ${p.y - 22}px)`;
           el.style.opacity = "1";
+          // Drive the badge's green afterburner aura: intensity tracks the
+          // plasma boost, so the card glows and fades in exact lockstep with the
+          // rocket's flame. Inherited by the card's overlays via this CSS var.
+          el.style.setProperty("--surge", (p.boost ?? 0).toFixed(3));
+        }
+        // The instant a new number lands, punch the card (pop + light sweep)
+        // and float a "+N" showing exactly how much it jumped.
+        if (p.surgeStart) {
+          fireSurge(cardRefs.current[i]);
+          if (p.gain > 0) {
+            const id = floatId.current++;
+            const fx = p.x + 110, fy = p.y - 30;
+            setFloats((fs) => [...fs.slice(-12), { id, amount: p.gain, x: fx, y: fy }]);
+          }
         }
         const arrow = trendRefs.current[i];
         if (arrow) {
@@ -728,7 +783,7 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
       // Hide unused labels
       for (let i = positions.length; i < labelRefs.current.length; i++) {
         const el = labelRefs.current[i];
-        if (el) el.style.opacity = "0";
+        if (el) { el.style.opacity = "0"; el.style.setProperty("--surge", "0"); }
       }
     }
     animRef.current = requestAnimationFrame(frame);
@@ -760,8 +815,10 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
           >
             {p && (
               <div
+                ref={(el) => { cardRefs.current[i] = el; }}
+                className="race-mp-card"
                 style={{
-                  display: "flex", flexDirection: "column", gap: 1,
+                  position: "relative", isolation: "isolate",
                   background: `linear-gradient(135deg, ${hexA(p.color, 0.22)}, ${hexA(p.color, 0.10)})`,
                   border: `1px solid ${hexA(p.color, p.isMe ? 0.9 : 0.4)}`,
                   borderRadius: 6, padding: "3px 8px",
@@ -770,40 +827,78 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
                   minWidth: 120,
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  {/* rank badge */}
-                  <span style={{
-                    fontSize: 9, fontWeight: 900, fontFamily: "ui-monospace, monospace",
-                    color: p.color, opacity: 0.8, lineHeight: 1,
-                    background: hexA(p.color, 0.15), padding: "1px 4px", borderRadius: 3,
-                  }}>#{i + 1}</span>
-                  <span className="race-glitch" style={{
-                    fontSize: 10, fontWeight: 700, fontFamily: "ui-monospace, monospace",
-                    color: p.isMe ? "#ffffff" : "#e0e8ff", letterSpacing: "0.06em",
-                    textShadow: p.isMe ? `0 0 8px ${p.color}` : "none",
-                  }}>{p.name}{p.isMe ? " ★" : ""}</span>
-                  {/* rank-change arrow — glyph/color/pulse driven by the frame loop */}
-                  <span
-                    ref={(el) => { trendRefs.current[i] = el; }}
-                    style={{
-                      fontSize: 10, marginLeft: 2, lineHeight: 1, display: "inline-block",
-                      color: "rgba(180,200,220,0.4)",
-                    }}
-                  >▬</span>
-                </div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
-                  <CountUp value={p.totalTokens} style={{
-                    fontSize: 13, fontWeight: 800, fontFamily: "var(--font-space-grotesk), monospace",
-                    color: p.isMe ? "#ffffff" : hexA(p.color, 0.95),
-                    fontVariantNumeric: "tabular-nums",
-                  }} />
-                  <span style={{ fontSize: 8, color: "rgba(180,200,220,0.5)", fontFamily: "ui-monospace, monospace" }}>tokens</span>
+                {/* Green afterburner aura — opacity = --surge (the plasma boost) */}
+                <span className="race-mp-aura" aria-hidden={true} />
+                {/* Clipped light sweep, fired by fireSurge() on a new number */}
+                <span className="race-mp-shineclip" aria-hidden={true}>
+                  <span className="race-mp-shine" />
+                </span>
+
+                {/* Content sits above the overlays */}
+                <div style={{ position: "relative", zIndex: 2, display: "flex", flexDirection: "column", gap: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    {/* rank badge */}
+                    <span style={{
+                      fontSize: 9, fontWeight: 900, fontFamily: "ui-monospace, monospace",
+                      color: p.color, opacity: 0.8, lineHeight: 1,
+                      background: hexA(p.color, 0.15), padding: "1px 4px", borderRadius: 3,
+                    }}>#{i + 1}</span>
+                    <span className="race-glitch" style={{
+                      fontSize: 10, fontWeight: 700, fontFamily: "ui-monospace, monospace",
+                      color: p.isMe ? "#ffffff" : "#e0e8ff", letterSpacing: "0.06em",
+                      textShadow: p.isMe ? `0 0 8px ${p.color}` : "none",
+                    }}>{p.name}{p.isMe ? " ★" : ""}</span>
+                    {/* rank-change arrow — glyph/color/pulse driven by the frame loop */}
+                    <span
+                      ref={(el) => { trendRefs.current[i] = el; }}
+                      style={{
+                        fontSize: 10, marginLeft: 2, lineHeight: 1, display: "inline-block",
+                        color: "rgba(180,200,220,0.4)",
+                      }}
+                    >▬</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
+                    <CountUp value={p.totalTokens} className="race-mp-num" style={{
+                      fontSize: 13, fontWeight: 800, fontFamily: "var(--font-space-grotesk), monospace",
+                      color: p.isMe ? "#ffffff" : hexA(p.color, 0.95),
+                      fontVariantNumeric: "tabular-nums",
+                    }} />
+                    <span style={{ fontSize: 8, color: "rgba(180,200,220,0.5)", fontFamily: "ui-monospace, monospace" }}>tokens</span>
+                    {p.totalCost != null && (
+                      <span style={{
+                        marginLeft: 5, fontSize: 11, fontWeight: 800,
+                        color: "rgba(74,222,128,0.95)",
+                        fontFamily: "var(--font-space-grotesk), ui-monospace, monospace",
+                        fontVariantNumeric: "tabular-nums",
+                        textShadow: "0 0 6px rgba(74,222,128,0.35)",
+                      }}>{fmtCost(p.totalCost)}</span>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
           </div>
         );
       })}
+
+      {/* Floating "+N" gain popups — how much each racer just jumped */}
+      {floats.map((f) => (
+        <div
+          key={f.id}
+          style={{
+            position: "absolute", top: 0, left: 0,
+            transform: `translate(${f.x}px, ${f.y}px)`,
+            pointerEvents: "none", zIndex: 6,
+          }}
+        >
+          <div
+            className="race-mp-gain"
+            onAnimationEnd={() => setFloats((fs) => fs.filter((x) => x.id !== f.id))}
+          >
+            +{fmt(f.amount)}
+          </div>
+        </div>
+      ))}
 
       {/* Connection status badge */}
       <div style={{

@@ -52,16 +52,18 @@ export async function POST() {
   const { since, to } = periodWindow(racePeriod);
 
   const agg = await prisma.call.aggregate({
-    _sum: { inputTokens: true, cacheCreationTokens: true, outputTokens: true },
+    _sum: { inputTokens: true, cacheCreationTokens: true, outputTokens: true, cost: true },
     where: { timestamp: { gte: since, lte: to } },
   });
   const totalTokens =
     (agg._sum.inputTokens ?? 0) +
     (agg._sum.cacheCreationTokens ?? 0) +
     (agg._sum.outputTokens ?? 0);
+  // USD spent in the same window. copilot/cursor contribute 0 (subscription).
+  const totalCost = agg._sum.cost ?? 0;
 
   // Fire-and-forget push to race server
-  reportToRace(totalTokens, racePeriod).catch(() => {});
+  reportToRace(totalTokens, totalCost, racePeriod).catch(() => {});
 
   return Response.json({
     synced:      get(claude) + get(cline) + get(codex) + get(gemini) + get(copilot) + get(cursor) + get(antigravity),
@@ -73,6 +75,7 @@ export async function POST() {
     cursor:      get(cursor),
     antigravity: get(antigravity),
     totalTokens,
+    totalCost,
     racePeriod,
     // This machine's racer identity (server-side .env). The /race view gate
     // locks its login name to this, and the "me" badge displays it.

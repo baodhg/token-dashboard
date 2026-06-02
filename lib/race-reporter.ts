@@ -55,7 +55,7 @@ async function getToken(): Promise<string | null> {
   return login();
 }
 
-export async function reportToRace(totalTokens: number, period = RACE_PERIOD): Promise<void> {
+export async function reportToRace(totalTokens: number, totalCost: number | null = null, period = RACE_PERIOD): Promise<void> {
   if (!RACE_SERVER_URL || !RACE_PLAYER_NAME || !RACE_PLAYER_PASS) return;
 
   const token = await getToken();
@@ -65,7 +65,7 @@ export async function reportToRace(totalTokens: number, period = RACE_PERIOD): P
     fetch(`${RACE_SERVER_URL}/report`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: t, totalTokens, period }),
+      body: JSON.stringify({ token: t, totalTokens, totalCost, period }),
     });
 
   let res = await doReport(token);
