@@ -466,7 +466,7 @@ function createPlayerRockets() {
   }
 
   return {
-    setPlayers(list: Array<{ name: string; totalTokens: number; color: string; isMe: boolean }>) {
+    setPlayers(list: Array<{ name: string; totalTokens: number; color: string; isMe: boolean; totalCost?: number | null }>) {
       const newMax = Math.max(1, ...list.map((p) => p.totalTokens));
       const prev = new Map(rockets.map((r: any) => [r.name, r]));
       rockets = list.map((p, i) => {
@@ -474,6 +474,11 @@ function createPlayerRockets() {
         const prevTokens = old ? old.totalTokens : p.totalTokens;
         const gained = p.totalTokens - prevTokens;
         const grew = !!old && gained >= SURGE_MIN_TOKENS;
+        // Cost delta for the same surge. null when either side has no cost (old
+        // rows / reporters that don't send it) so no "+$" is shown.
+        const curCost = typeof p.totalCost === "number" ? p.totalCost : null;
+        const prevCost = old && typeof old.cost === "number" ? old.cost : null;
+        const costGain = grew && curCost != null && prevCost != null ? Math.max(0, curCost - prevCost) : 0;
         const burstTimer = grew ? BURST_FRAMES : old ? Math.max(0, old.burstTimer || 0) : 0;
         const oldRank = old ? old.rank : i;
         // Carry over the existing trend; only refresh it (and its expiry) on an
@@ -491,7 +496,9 @@ function createPlayerRockets() {
           thrust: old ? old.thrust : 0,
           burn: old ? (old.burn || 0) : 0,
           bob: old ? old.bob : rnd(0, TAU),
-          burstTimer, burstStart: grew, gain: grew ? gained : 0, rank: i, prevRank: old ? old.rank : i,
+          burstTimer, burstStart: grew, gain: grew ? gained : 0,
+          cost: curCost, costGain,
+          rank: i, prevRank: old ? old.rank : i,
           trend, trendUntil,
           boomTimer: old ? (old.boomTimer || 0) : 0,
         };
@@ -587,7 +594,7 @@ function createPlayerRockets() {
         const trendActive = r.trend !== "same" && clock < r.trendUntil;
         if (!trendActive && r.trend !== "same") r.trend = "same";
         out.push({ name: r.name, x: r.x, y, color: r.color, totalTokens: r.totalTokens,
-          isMe: r.isMe, trend: r.trend, trendActive, boost, surgeStart, gain: r.gain });
+          isMe: r.isMe, trend: r.trend, trendActive, boost, surgeStart, gain: r.gain, costGain: r.costGain });
       });
       if (sparks.length > 1400) sparks = sparks.slice(-1400);
       return out;
@@ -660,7 +667,7 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
   const [players, setPlayers] = useState<PlayerStat[]>([]);
   // Floating "+N" gain popups — one spawned per number jump (surge), drifts up
   // and fades. Self-removed on animation end; capped to avoid runaway growth.
-  const [floats, setFloats] = useState<Array<{ id: number; amount: number; x: number; y: number }>>([]);
+  const [floats, setFloats] = useState<Array<{ id: number; amount: number; cost: number | null; x: number; y: number }>>([]);
   const floatId = useRef(0);
 
   // Stable color per player name
@@ -768,7 +775,9 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
           if (p.gain > 0) {
             const id = floatId.current++;
             const fx = p.x + 110, fy = p.y - 30;
-            setFloats((fs) => [...fs.slice(-12), { id, amount: p.gain, x: fx, y: fy }]);
+            // Only attach a "+$" line once the delta rounds to at least a cent.
+            const cost = p.costGain >= 0.01 ? p.costGain : null;
+            setFloats((fs) => [...fs.slice(-12), { id, amount: p.gain, cost, x: fx, y: fy }]);
           }
         }
         const arrow = trendRefs.current[i];
@@ -865,12 +874,11 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
                     }} />
                     <span style={{ fontSize: 8, color: "rgba(180,200,220,0.5)", fontFamily: "ui-monospace, monospace" }}>tokens</span>
                     {p.totalCost != null && (
-                      <span style={{
+                      <span className="race-mp-cost" style={{
                         marginLeft: 5, fontSize: 11, fontWeight: 800,
                         color: "rgba(74,222,128,0.95)",
                         fontFamily: "var(--font-space-grotesk), ui-monospace, monospace",
                         fontVariantNumeric: "tabular-nums",
-                        textShadow: "0 0 6px rgba(74,222,128,0.35)",
                       }}>{fmtCost(p.totalCost)}</span>
                     )}
                   </div>
@@ -895,7 +903,8 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
             className="race-mp-gain"
             onAnimationEnd={() => setFloats((fs) => fs.filter((x) => x.id !== f.id))}
           >
-            +{fmt(f.amount)}
+            <span className="race-mp-gain-tok">+{fmt(f.amount)}</span>
+            {f.cost != null && <span className="race-mp-gain-cost">+{fmtCost(f.cost)}</span>}
           </div>
         </div>
       ))}
