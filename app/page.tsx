@@ -640,100 +640,8 @@ const [customRange, setCustomRange] = useState(() => ({
 
 
       {/* ── Main ── */}
-      <main className="max-w-7xl mx-auto px-6 py-6 space-y-5">
+      <main className="max-w-7xl mx-auto px-6 py-6 space-y-5 pb-28">
 
-        {/* Global Filters */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-card rounded-2xl p-3 border border-border shadow-sm">
-          
-          {/* Period pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-            {PERIODS.map(({ key }) => (
-              <button
-                key={key}
-                onClick={() => {
-                  setPeriod(key);
-                  if (key !== "1d" && viewMode === "calls") setViewMode("sessions");
-                }}
-                className={`shrink-0 px-4 py-2 rounded-full text-[13px] font-medium transition-all cursor-pointer ${
-                  period === key
-                    ? "bg-foreground text-background shadow-sm"
-                    : "text-[#3c3c43] dark:text-[#c7c7cc] hover:bg-muted"
-                }`}
-              >
-                {t(`periods.${key}`)}
-              </button>
-            ))}
-            {period === "custom" && (
-              <div className="flex items-center gap-1.5 ml-2 border-l border-border pl-3">
-                <input
-                  type="date"
-                  value={customRange.from}
-                  onChange={e => setCustomRange(p => ({ ...p, from: e.target.value }))}
-                  className="bg-transparent text-[13px] text-foreground border border-border rounded-md px-2 py-1.5 outline-none focus:border-foreground"
-                />
-                <span className="text-[#8e8e93] dark:text-[#98989d] text-[13px]">-</span>
-                <input
-                  type="date"
-                  value={customRange.to}
-                  onChange={e => setCustomRange(p => ({ ...p, to: e.target.value }))}
-                  className="bg-transparent text-[13px] text-foreground border border-border rounded-md px-2 py-1.5 outline-none focus:border-foreground"
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Source filter */}
-          <div className="flex items-center gap-2 overflow-x-auto shrink-0" style={{ scrollbarWidth: "none" }}>
-          {(["all", "claude_code", "cline", "codex", "gemini", "antigravity_cli", "github_copilot", "cursor"] as Source[]).map(s => {
-            const label = s === "all" ? t("common.all") : SOURCE_LABELS[s];
-            const isSelected = source === s;
-            const brandColor = SOURCE_COLORS[s] ?? "#8e8e93";
-            const iconSrc = s === "all" ? null : SOURCE_ICONS[s];
-
-            return (
-              <button
-                key={s}
-                onClick={() => setSource(s)}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-all cursor-pointer border whitespace-nowrap ${
-                  isSelected
-                    ? s === "all"
-                      ? "bg-foreground text-background border-foreground shadow-sm"
-                      : "shadow-sm"
-                    : "border-border text-muted-foreground hover:bg-muted"
-                }`}
-                style={isSelected && s !== "all" ? {
-                  backgroundColor: `${brandColor}15`,
-                  color: (s === "cursor") ? "var(--foreground)" : brandColor,
-                  borderColor: `${brandColor}30`
-                } : {}}
-              >
-                {iconSrc ? (
-                  <div className="w-3.5 h-3.5 flex items-center justify-center overflow-hidden">
-                    <Image 
-                      src={iconSrc} 
-                      alt={label} 
-                      width={14} 
-                      height={14} 
-                      style={{ 
-                        width: 14, 
-                        height: 14, 
-                        objectFit: "contain", 
-                        transform: (s === "codex" || s === "github_copilot" || s === "cursor") ? "scale(1.4)" : undefined,
-                      }} 
-                    />
-                  </div>
-                ) : s !== "all" ? (
-                  <span
-                    className="w-1.5 h-1.5 rounded-full"
-                    style={{ background: brandColor }}
-                  />
-                ) : null}
-                {label}
-              </button>
-            );
-          })}
-          </div>
-        </div>
         {/* Row 1: Stat cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {statCards.map(s => (
@@ -1045,6 +953,104 @@ const [customRange, setCustomRange] = useState(() => ({
         </div>
 
       </main>
+
+      {/* ── Floating Dock Filters ── */}
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-5xl px-4 pointer-events-none">
+        <div className="mx-auto flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-5 bg-background/75 backdrop-blur-2xl border border-border/40 shadow-2xl shadow-black/10 dark:shadow-black/40 rounded-3xl p-3 pointer-events-auto">
+          
+          {/* Period filter dock segment */}
+          <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto px-1" style={{ scrollbarWidth: "none" }}>
+            {PERIODS.map(({ key }) => (
+              <button
+                key={key}
+                onClick={() => {
+                  setPeriod(key);
+                  if (key !== "1d" && viewMode === "calls") setViewMode("sessions");
+                }}
+                className={`shrink-0 px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-all cursor-pointer ${
+                  period === key
+                    ? "bg-foreground text-background shadow-sm scale-105"
+                    : "text-[#3c3c43] dark:text-[#c7c7cc] hover:bg-muted"
+                }`}
+              >
+                {t(`periods.${key}`)}
+              </button>
+            ))}
+            {period === "custom" && (
+              <div className="flex items-center gap-1.5 ml-1 pl-2 border-l border-border/50">
+                <input
+                  type="date"
+                  value={customRange.from}
+                  onChange={e => setCustomRange(p => ({ ...p, from: e.target.value }))}
+                  className="bg-transparent text-[11px] text-foreground border border-border/50 rounded-md px-1.5 py-1 outline-none focus:border-foreground"
+                />
+                <span className="text-[#8e8e93] text-[11px]">-</span>
+                <input
+                  type="date"
+                  value={customRange.to}
+                  onChange={e => setCustomRange(p => ({ ...p, to: e.target.value }))}
+                  className="bg-transparent text-[11px] text-foreground border border-border/50 rounded-md px-1.5 py-1 outline-none focus:border-foreground"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Divider */}
+          <div className="hidden sm:block w-px h-6 bg-border/50" />
+
+          {/* Source filter dock segment */}
+          <div className="flex items-center gap-1 overflow-x-auto w-full sm:w-auto px-1" style={{ scrollbarWidth: "none" }}>
+            {(["all", "claude_code", "cline", "codex", "gemini", "antigravity_cli", "github_copilot", "cursor"] as Source[]).map(s => {
+              const label = s === "all" ? t("common.all") : SOURCE_LABELS[s];
+              const isSelected = source === s;
+              const brandColor = SOURCE_COLORS[s] ?? "#8e8e93";
+              const iconSrc = s === "all" ? null : SOURCE_ICONS[s];
+
+              return (
+                <button
+                  key={s}
+                  onClick={() => setSource(s)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium transition-all cursor-pointer border whitespace-nowrap ${
+                    isSelected
+                      ? s === "all"
+                        ? "bg-foreground text-background border-foreground shadow-sm scale-105"
+                        : "shadow-sm scale-105"
+                      : "border-transparent text-muted-foreground hover:bg-muted"
+                  }`}
+                  style={isSelected && s !== "all" ? {
+                    backgroundColor: `${brandColor}15`,
+                    color: (s === "cursor") ? "var(--foreground)" : brandColor,
+                    borderColor: `${brandColor}30`
+                  } : {}}
+                >
+                  {iconSrc ? (
+                    <div className="w-3.5 h-3.5 flex items-center justify-center overflow-hidden">
+                      <Image 
+                        src={iconSrc} 
+                        alt={label} 
+                        width={14} 
+                        height={14} 
+                        style={{ 
+                          width: 14, 
+                          height: 14, 
+                          objectFit: "contain", 
+                          transform: (s === "codex" || s === "github_copilot" || s === "cursor") ? "scale(1.4)" : undefined,
+                        }} 
+                      />
+                    </div>
+                  ) : s !== "all" ? (
+                    <span
+                      className="w-1.5 h-1.5 rounded-full"
+                      style={{ background: brandColor }}
+                    />
+                  ) : null}
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
