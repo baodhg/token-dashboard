@@ -33,6 +33,7 @@ interface MultiplayerRaceProps {
 class AudioEngine {
   ctx: AudioContext | null = null;
   muted = true;
+  bgmNodes: any[] = [];
 
   init() {
     if (typeof window === "undefined") return;
@@ -45,9 +46,56 @@ class AudioEngine {
   }
 
   toggle() {
-    if (this.muted) this.init();
-    else this.muted = true;
+    if (this.muted) {
+      this.init();
+      this.playBgm();
+    } else {
+      this.muted = true;
+      this.stopBgm();
+    }
     return !this.muted;
+  }
+
+  playBgm() {
+    if (this.muted || !this.ctx || this.bgmNodes.length) return;
+    const t = this.ctx.currentTime;
+    
+    // Deep drone / engine hum
+    const osc = this.ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.value = 65.41; // C2
+    
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 400;
+    
+    const lfo = this.ctx.createOscillator();
+    lfo.type = "sine";
+    lfo.frequency.value = 0.2; // Slow sweep
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.value = 200;
+    lfo.connect(lfoGain);
+    lfoGain.connect(filter.frequency);
+    
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.05; // Quiet background drone
+    
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    
+    osc.start(t);
+    lfo.start(t);
+    
+    this.bgmNodes = [osc, lfo, gain, filter];
+  }
+  
+  stopBgm() {
+    this.bgmNodes.forEach(n => {
+      try { if (n.stop) n.stop(); } catch {}
+      try { n.disconnect(); } catch {}
+    });
+    this.bgmNodes = [];
   }
 
   playCoin() {
