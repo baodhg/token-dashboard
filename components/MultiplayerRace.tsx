@@ -240,19 +240,17 @@ function createGalaxy() {
     needsStatic = false;
   }
 
-  function drawStarLayer(ctx: CanvasRenderingContext2D, stars: any[], drift: number, brightness: number, warp: number = 0) {
+  function drawStarLayer(ctx: CanvasRenderingContext2D, stars: any[], drift: number, brightness: number) {
     stars.forEach((s) => {
       s.tw += s.twSpeed; 
-      s.x -= drift * (1 + warp * 15); // Warp accelerates drift
-      if (s.x < -10 - warp * 100) s.x = W + 10 + rnd(0, 100);
+      s.x -= drift;
+      if (s.x < -4) s.x = W + 4;
       const [r, g, b] = s.tint;
       const tw = brightness * (1 - s.twAmt * Math.abs(Math.sin(s.tw)));
       ctx.globalAlpha = tw;
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.beginPath(); 
-      // Stretch horizontally during warp
-      const stretch = 1 + warp * s.r * 18;
-      ctx.ellipse(s.x, s.y, s.r * stretch, s.r, 0, 0, TAU); 
+      ctx.arc(s.x, s.y, s.r, 0, TAU); 
       ctx.fill();
     });
     ctx.globalAlpha = 1;
@@ -274,12 +272,12 @@ function createGalaxy() {
 
   return {
     resize(w: number, h: number) { W = w; H = h; rebuild(); },
-    draw(ctx: CanvasRenderingContext2D, warp: number = 0) {
+    draw(ctx: CanvasRenderingContext2D) {
       if (needsStatic) buildStatic();
       ctx.drawImage(staticCanvas!, 0, 0, W, H);
       drawGalaxies(ctx);
-      drawStarLayer(ctx, starsMid, 0.18, 0.7, warp);
-      drawStarLayer(ctx, starsNear, 0.5, 0.95, warp);
+      drawStarLayer(ctx, starsMid, 0.18, 0.7);
+      drawStarLayer(ctx, starsNear, 0.5, 0.95);
       // Meteors
       if (Math.random() < 0.010 && meteors.length < 3) meteors.push(spawnMeteor());
       for (let i = meteors.length - 1; i >= 0; i--) {
@@ -918,7 +916,7 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
       cx.save();
       if (shake > 0.5) cx.translate(rnd(-shake, shake), rnd(-shake, shake));
       
-      galaxyRef.current!.draw(cx, warp);
+      galaxyRef.current!.draw(cx);
       const positions = engineRef.current!.frame(cx, t);
       cx.restore();
       
