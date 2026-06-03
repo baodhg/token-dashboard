@@ -29,6 +29,81 @@ interface MultiplayerRaceProps {
   spectator?: boolean;
 }
 
+// ── Procedural Web Audio Engine ───────────────────────────────────────────────
+class AudioEngine {
+  ctx: AudioContext | null = null;
+  muted = true;
+
+  init() {
+    if (typeof window === "undefined") return;
+    if (!this.ctx) {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioContextClass) this.ctx = new AudioContextClass();
+    }
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+    this.muted = false;
+  }
+
+  toggle() {
+    if (this.muted) this.init();
+    else this.muted = true;
+    return !this.muted;
+  }
+
+  playCoin() {
+    if (this.muted || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.connect(gain); gain.connect(this.ctx.destination);
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(1200, t);
+    osc.frequency.setValueAtTime(1600, t + 0.05);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.15, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+    osc.start(t); osc.stop(t + 0.35);
+  }
+
+  playOvertake() {
+    if (this.muted || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    const bufferSize = this.ctx.sampleRate * 1;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(200, t);
+    filter.frequency.exponentialRampToValueAtTime(3000, t + 0.3);
+    filter.frequency.exponentialRampToValueAtTime(200, t + 0.8);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.2, t + 0.2);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.8);
+    noise.connect(filter); filter.connect(gain); gain.connect(this.ctx.destination);
+    noise.start(t); noise.stop(t + 0.8);
+  }
+
+  playSurge() {
+    if (this.muted || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(150, t);
+    osc.frequency.exponentialRampToValueAtTime(30, t + 0.5);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.2, t + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.6);
+    osc.connect(gain); gain.connect(this.ctx.destination);
+    osc.start(t); osc.stop(t + 0.65);
+  }
+}
+export const sfx = new AudioEngine();
+
 // ── Shared math / color helpers (duplicated from ModelRace to keep files independent) ─
 const TAU = Math.PI * 2;
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
@@ -165,15 +240,20 @@ function createGalaxy() {
     needsStatic = false;
   }
 
-  function drawStarLayer(ctx: CanvasRenderingContext2D, stars: any[], drift: number, brightness: number) {
+  function drawStarLayer(ctx: CanvasRenderingContext2D, stars: any[], drift: number, brightness: number, warp: number = 0) {
     stars.forEach((s) => {
-      s.tw += s.twSpeed; s.x -= drift;
-      if (s.x < -4) s.x = W + 4;
+      s.tw += s.twSpeed; 
+      s.x -= drift * (1 + warp * 15); // Warp accelerates drift
+      if (s.x < -10 - warp * 100) s.x = W + 10 + rnd(0, 100);
       const [r, g, b] = s.tint;
       const tw = brightness * (1 - s.twAmt * Math.abs(Math.sin(s.tw)));
       ctx.globalAlpha = tw;
       ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, TAU); ctx.fill();
+      ctx.beginPath(); 
+      // Stretch horizontally during warp
+      const stretch = 1 + warp * s.r * 18;
+      ctx.ellipse(s.x, s.y, s.r * stretch, s.r, 0, 0, TAU); 
+      ctx.fill();
     });
     ctx.globalAlpha = 1;
   }
@@ -194,12 +274,12 @@ function createGalaxy() {
 
   return {
     resize(w: number, h: number) { W = w; H = h; rebuild(); },
-    draw(ctx: CanvasRenderingContext2D) {
+    draw(ctx: CanvasRenderingContext2D, warp: number = 0) {
       if (needsStatic) buildStatic();
       ctx.drawImage(staticCanvas!, 0, 0, W, H);
       drawGalaxies(ctx);
-      drawStarLayer(ctx, starsMid, 0.18, 0.7);
-      drawStarLayer(ctx, starsNear, 0.5, 0.95);
+      drawStarLayer(ctx, starsMid, 0.18, 0.7, warp);
+      drawStarLayer(ctx, starsNear, 0.5, 0.95, warp);
       // Meteors
       if (Math.random() < 0.010 && meteors.length < 3) meteors.push(spawnMeteor());
       for (let i = meteors.length - 1; i >= 0; i--) {
@@ -244,6 +324,8 @@ function createPlayerRockets() {
   let sparks: any[] = [];
   let maxTokens = 1;
   let clock = 0; // accumulated seconds, advanced each frame by the render loop
+  let globalShake = 0;
+  let globalWarp = 0;
 
   function emitSparks(x: number, y: number, color: string, thrust: number) {
     const n = Math.floor(1 + thrust * 4);
@@ -264,6 +346,16 @@ function createPlayerRockets() {
   function drawSparks(ctx: CanvasRenderingContext2D) {
     for (let i = sparks.length - 1; i >= 0; i--) {
       const p = sparks[i];
+      if (p.kind === "ring") { // Overtake Shockwave
+        p.life--;
+        if (p.life <= 0) { sparks.splice(i, 1); continue; }
+        const prog = 1 - p.life / p.max;
+        ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = (1 - prog) * 0.9;
+        ctx.strokeStyle = p.color; ctx.lineWidth = 2 + (1 - prog) * 5;
+        ctx.beginPath(); ctx.ellipse(p.x, p.y, prog * 180, prog * 60, 0, 0, TAU); ctx.stroke();
+        ctx.restore();
+        continue;
+      }
       if (p.kind === "shock") {
         p.life--;
         if (p.life <= 0) { sparks.splice(i, 1); continue; }
@@ -372,10 +464,11 @@ function createPlayerRockets() {
   // Faces +x. The exhaust nozzle is a flat face at x≈0 (the flame origin), so
   // the plume erupts straight out of the engine — no gap. The name lives in the
   // HUD label, so no letter is drawn.
-  function drawRocketBody(ctx: CanvasRenderingContext2D, color: string, _name: string, isMe: boolean) {
+  function drawRocketBody(ctx: CanvasRenderingContext2D, color: string, _name: string, isMe: boolean, tilt: number = 0) {
     const R = isMe ? 30 : 24;
     ctx.save();
     ctx.scale(R / 22, R / 22);
+    ctx.rotate(tilt);
     ctx.lineJoin = "miter";
     ctx.miterLimit = 8;
 
@@ -423,6 +516,23 @@ function createPlayerRockets() {
     body.addColorStop(1, neon);
     ctx.fillStyle = body;
     hull(ctx); ctx.fill();
+
+    // ── Cockpit / Canopy ──────────────────────────────────────────────────────
+    const canopy = ctx.createLinearGradient(14, -4, 28, 6);
+    canopy.addColorStop(0, "#0a1a2a");
+    canopy.addColorStop(0.5, "#4affe0"); // Cyan glass reflection
+    canopy.addColorStop(1, "#ffffff");
+    ctx.fillStyle = canopy;
+    ctx.beginPath();
+    ctx.moveTo(18, -4); ctx.lineTo(28, -2); ctx.lineTo(26, 2); ctx.lineTo(14, 4);
+    ctx.closePath(); ctx.fill();
+
+    // ── Panel lines (subtle hull details) ─────────────────────────────────────
+    ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(13, -13); ctx.lineTo(13, 13); // Vertical seam
+    ctx.moveTo(4, -NOZZLE_H); ctx.lineTo(24, 0); // Diagonal seam
+    ctx.stroke();
 
     // ── Armor plate shading — a darker belly wedge for volume ────────────────
     ctx.globalAlpha = 0.4; ctx.fillStyle = shade(color, -70);
@@ -491,7 +601,8 @@ function createPlayerRockets() {
         }
         return {
           name: p.name, totalTokens: p.totalTokens, color: p.color, isMe: p.isMe, i,
-          x: old ? old.x : 70, y: old ? old.y : 0,
+          x: old ? old.x : 70, y: old && old.y !== undefined ? old.y : null,
+          tilt: old ? old.tilt || 0 : 0,
           seed: old ? old.seed : rnd(0, 1000),
           thrust: old ? old.thrust : 0,
           burn: old ? (old.burn || 0) : 0,
@@ -505,9 +616,14 @@ function createPlayerRockets() {
       });
       maxTokens = newMax;
     },
+    getShake() { return globalShake; },
+    getWarp()  { return globalWarp; },
     layout(w: number, h: number) { W = w; H = h; },
     frame(ctx: CanvasRenderingContext2D, t: number) {
       clock = t;
+      if (globalShake > 0.1) globalShake *= 0.85; else globalShake = 0;
+      if (globalWarp > 0.01) globalWarp *= 0.94; else globalWarp = 0;
+      
       const n = rockets.length;
       if (!n) return [];
       // topPad clears the header stack (title + sub + tab switcher) so the top
@@ -548,12 +664,31 @@ function createPlayerRockets() {
         const cruise = 0.35 + pixelSpeed * 0.65;
         r.thrust = cruise + (1.0 - cruise) * burstIntensity;
         r.bob += 0.05;
-        const y = laneAt(i) + Math.sin(r.bob) * 2.4;
-        r.y = y;
+        
+        const targetY = laneAt(i) + Math.sin(r.bob) * 2.4;
+        if (r.y === null || r.y === undefined) r.y = targetY;
+        const prevY = r.y;
+        r.y += (targetY - r.y) * 0.12;
+        const vy = r.y - prevY;
+        const targetTilt = Math.max(-0.25, Math.min(0.25, vy * 0.05));
+        r.tilt += (targetTilt - r.tilt) * 0.2;
+        const y = r.y;
+
         const sparkThreshold = 0.15 - burstIntensity * 0.12;
         if (Math.random() > sparkThreshold) emitSparks(r.x - 6, y, r.color, r.thrust);
         if (r.burstStart) {
           r.burstStart = false;
+          
+          if (r.gain > 1000) {
+            globalShake = Math.min(globalShake + 8, 20);
+            globalWarp = Math.min(globalWarp + 0.6, 1);
+            sfx.playSurge();
+          } else if (r.gain > 100) {
+            globalShake = Math.min(globalShake + 4, 12);
+            globalWarp = Math.min(globalWarp + 0.3, 0.8);
+            if (r.gain > 500) sfx.playSurge();
+          }
+
           sparks.push({ x: r.x, y, vx: 30, vy: 0, life: 34, max: 34, size: 12, color: "#ffffff", kind: "shock" });
           sparks.push({ x: r.x, y, vx: 44, vy: 0, life: 40, max: 40, size: 16, color: r.color, kind: "shock" });
           for (let k = 0; k < 22; k++) {
@@ -564,6 +699,9 @@ function createPlayerRockets() {
         }
         if (r.prevRank > r.rank) {
           r.boomTimer = 22; r.prevRank = r.rank;
+          sfx.playOvertake();
+          // Overtake Shockwave Ring
+          sparks.push({ x: r.x, y, vx: 0, vy: 0, life: 35, max: 35, size: 0, color: r.color, kind: "ring" });
           for (let k = 0; k < 2; k++) {
             sparks.push({ x: r.x, y, vx: 18 + k * 14, vy: 0, life: 26, max: 26, size: 6 + k * 3, color: "#ffffff", kind: "shock" });
           }
@@ -587,8 +725,27 @@ function createPlayerRockets() {
         ctx.save();
         ctx.translate(r.x, y);
         const boost = Math.min(1, Math.max(burstIntensity, r.boomTimer / 22));
+        
+        // ── Wingtip Trails (High speed only) ──────────────────────────────────
+        if (burstIntensity > 0.3 || globalWarp > 0.2) {
+          ctx.save();
+          const R = r.isMe ? 30 : 24;
+          ctx.scale(R / 22, R / 22);
+          ctx.rotate(r.tilt);
+          const intensity = Math.max(burstIntensity, globalWarp);
+          const trail = ctx.createLinearGradient(0, 0, -40 - intensity * 60, 0);
+          trail.addColorStop(0, hexA(r.color, 0.8 * intensity));
+          trail.addColorStop(1, "transparent");
+          ctx.strokeStyle = trail; ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(8, -27); ctx.lineTo(-40 - intensity * 60, -27 + rnd(-1, 1));
+          ctx.moveTo(8, 27); ctx.lineTo(-40 - intensity * 60, 27 + rnd(-1, 1));
+          ctx.stroke();
+          ctx.restore();
+        }
+
         drawFlame(ctx, r.thrust, r.color, t, r.seed, boost);
-        drawRocketBody(ctx, r.color, r.name, r.isMe);
+        drawRocketBody(ctx, r.color, r.name, r.isMe, r.tilt);
         ctx.restore();
         // Trend flashes only while inside its hold window, then settles to "same".
         const trendActive = r.trend !== "same" && clock < r.trendUntil;
@@ -669,6 +826,7 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
   // and fades. Self-removed on animation end; capped to avoid runaway growth.
   const [floats, setFloats] = useState<Array<{ id: number; amount: number; cost: number | null; x: number; y: number }>>([]);
   const floatId = useRef(0);
+  const [soundEnabled, setSoundEnabled] = useState(false);
 
   // Stable color per player name
   const colorMap = useRef(new Map<string, string>());
@@ -753,8 +911,17 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
     function frame() {
       animRef.current = requestAnimationFrame(frame);
       cx.clearRect(0, 0, W, H);
-      galaxyRef.current!.draw(cx);
+      
+      // ── Apply Camera Shake ──────────────────────────────────────────────────
+      const shake = engineRef.current?.getShake?.() || 0;
+      const warp = engineRef.current?.getWarp?.() || 0;
+      cx.save();
+      if (shake > 0.5) cx.translate(rnd(-shake, shake), rnd(-shake, shake));
+      
+      galaxyRef.current!.draw(cx, warp);
       const positions = engineRef.current!.frame(cx, t);
+      cx.restore();
+      
       t += 0.016;
 
       // Update HUD labels + rank-change arrows
@@ -777,6 +944,7 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
             const fx = p.x + 110, fy = p.y - 30;
             // Only attach a "+$" line once the delta rounds to at least a cent.
             const cost = p.costGain >= 0.01 ? p.costGain : null;
+            if (cost !== null) sfx.playCoin();
             setFloats((fs) => [...fs.slice(-12), { id, amount: p.gain, cost, x: fx, y: fy }]);
           }
         }
@@ -909,18 +1077,39 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
         </div>
       ))}
 
-      {/* Connection status badge */}
+      {/* Top Right Controls: Sound Toggle & Connection Status */}
       <div style={{
         position: "absolute", top: 16, right: 16,
-        display: "flex", alignItems: "center", gap: 6,
-        background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.1)",
-        borderRadius: 20, padding: "4px 10px",
-        fontFamily: "ui-monospace, monospace", fontSize: 10,
-        color: connected ? "#4ade80" : "#f87171",
-        backdropFilter: "blur(6px)",
+        display: "flex", alignItems: "center", gap: 8, zIndex: 80,
       }}>
-        <span style={{ width: 6, height: 6, borderRadius: "50%", background: connected ? "#4ade80" : "#f87171", display: "inline-block", boxShadow: connected ? "0 0 6px #4ade80" : "none" }} />
-        {connected ? `${players.length} racer${players.length !== 1 ? "s" : ""}` : "connecting…"}
+        {/* Sound Toggle */}
+        <button
+          onClick={() => setSoundEnabled(sfx.toggle())}
+          style={{
+            background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 20, padding: "4px 10px",
+            fontFamily: "ui-monospace, monospace", fontSize: 12,
+            color: soundEnabled ? "#4ade80" : "rgba(255,255,255,0.4)",
+            cursor: "pointer", backdropFilter: "blur(6px)",
+            transition: "all 0.2s",
+          }}
+          title={soundEnabled ? "Mute Sounds" : "Enable Sounds (Requires Click)"}
+        >
+          {soundEnabled ? "🔊" : "🔇"}
+        </button>
+
+        {/* Connection status badge */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 6,
+          background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 20, padding: "4px 10px",
+          fontFamily: "ui-monospace, monospace", fontSize: 10,
+          color: connected ? "#4ade80" : "#f87171",
+          backdropFilter: "blur(6px)",
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: connected ? "#4ade80" : "#f87171", display: "inline-block", boxShadow: connected ? "0 0 6px #4ade80" : "none" }} />
+          {connected ? `${players.length} racer${players.length !== 1 ? "s" : ""}` : "connecting…"}
+        </div>
       </div>
 
       {/* Me badge — hidden in spectator (projector) mode: there is no "me". */}
