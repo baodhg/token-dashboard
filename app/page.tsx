@@ -583,43 +583,6 @@ const [customRange, setCustomRange] = useState(() => ({
             <span className="font-semibold text-[15px] text-foreground">Token Dashboard</span>
           </div>
 
-          {/* Period pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-            {PERIODS.map(({ key }) => (
-              <button
-                key={key}
-                onClick={() => {
-                  setPeriod(key);
-                  if (key !== "1d" && viewMode === "calls") setViewMode("sessions");
-                }}
-                className={`shrink-0 px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-all cursor-pointer ${
-                  period === key
-                    ? "bg-foreground text-background shadow-sm"
-                    : "text-[#3c3c43] dark:text-[#c7c7cc] hover:bg-muted"
-                }`}
-              >
-                {t(`periods.${key}`)}
-              </button>
-            ))}
-            {period === "custom" && (
-              <div className="flex items-center gap-1.5 ml-2 border-l border-border pl-3">
-                <input
-                  type="date"
-                  value={customRange.from}
-                  onChange={e => setCustomRange(p => ({ ...p, from: e.target.value }))}
-                  className="bg-transparent text-[12px] text-foreground border border-border rounded-md px-2 py-1 outline-none focus:border-foreground"
-                />
-                <span className="text-[#8e8e93] dark:text-[#98989d] text-[12px]">-</span>
-                <input
-                  type="date"
-                  value={customRange.to}
-                  onChange={e => setCustomRange(p => ({ ...p, to: e.target.value }))}
-                  className="bg-transparent text-[12px] text-foreground border border-border rounded-md px-2 py-1 outline-none focus:border-foreground"
-                />
-              </div>
-            )}
-          </div>
-
           {/* Right cluster: theme toggle + sync */}
           <div className="flex items-center gap-2 shrink-0">
             <LanguageSwitcher />
@@ -679,8 +642,48 @@ const [customRange, setCustomRange] = useState(() => ({
       {/* ── Main ── */}
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-5">
 
-            {/* Source filter */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 shrink-0" style={{ scrollbarWidth: "none" }}>
+        {/* Global Filters */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-card rounded-2xl p-3 border border-border shadow-sm">
+          
+          {/* Period pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+            {PERIODS.map(({ key }) => (
+              <button
+                key={key}
+                onClick={() => {
+                  setPeriod(key);
+                  if (key !== "1d" && viewMode === "calls") setViewMode("sessions");
+                }}
+                className={`shrink-0 px-4 py-2 rounded-full text-[13px] font-medium transition-all cursor-pointer ${
+                  period === key
+                    ? "bg-foreground text-background shadow-sm"
+                    : "text-[#3c3c43] dark:text-[#c7c7cc] hover:bg-muted"
+                }`}
+              >
+                {t(`periods.${key}`)}
+              </button>
+            ))}
+            {period === "custom" && (
+              <div className="flex items-center gap-1.5 ml-2 border-l border-border pl-3">
+                <input
+                  type="date"
+                  value={customRange.from}
+                  onChange={e => setCustomRange(p => ({ ...p, from: e.target.value }))}
+                  className="bg-transparent text-[13px] text-foreground border border-border rounded-md px-2 py-1.5 outline-none focus:border-foreground"
+                />
+                <span className="text-[#8e8e93] dark:text-[#98989d] text-[13px]">-</span>
+                <input
+                  type="date"
+                  value={customRange.to}
+                  onChange={e => setCustomRange(p => ({ ...p, to: e.target.value }))}
+                  className="bg-transparent text-[13px] text-foreground border border-border rounded-md px-2 py-1.5 outline-none focus:border-foreground"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Source filter */}
+          <div className="flex items-center gap-2 overflow-x-auto shrink-0" style={{ scrollbarWidth: "none" }}>
           {(["all", "claude_code", "cline", "codex", "gemini", "antigravity_cli", "github_copilot", "cursor"] as Source[]).map(s => {
             const label = s === "all" ? t("common.all") : SOURCE_LABELS[s];
             const isSelected = source === s;
@@ -729,6 +732,7 @@ const [customRange, setCustomRange] = useState(() => ({
               </button>
             );
           })}
+          </div>
         </div>
         {/* Row 1: Stat cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
