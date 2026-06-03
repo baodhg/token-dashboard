@@ -125,21 +125,21 @@ async function syncFromSQLite(): Promise<number> {
             if (!e.timestamp) continue;
             const u = e.payload.info?.last_token_usage;
             if (!u) continue;
-            const inp = u.input_tokens ?? 0;
-            const out = (u.output_tokens ?? 0) + (u.reasoning_output_tokens ?? 0);
-            const cch = u.cached_input_tokens ?? 0;
-            if (inp === 0 && out === 0) continue;
+            const cache = u.cached_input_tokens ?? 0;
+            const inp   = Math.max(0, (u.input_tokens ?? 0) - cache);
+            const out   = (u.output_tokens ?? 0) + (u.reasoning_output_tokens ?? 0);
+            if (inp === 0 && out === 0 && cache === 0) continue;
 
             const model  = currentModel;
             const price  = getPrice(model);
-            const cost   = calcCost(price, { inputTokens: inp, cacheCreationTokens: 0, cacheTokens: cch, outputTokens: out });
+            const cost   = calcCost(price, { inputTokens: inp, cacheCreationTokens: 0, cacheTokens: cache, outputTokens: out });
             const callId = `codex_${thread.id}_${e.timestamp}`;
             keptIds.push(callId);
 
             await prisma.call.upsert({
               where:  { id: callId },
-              update: { model, inputTokens: inp, cacheCreationTokens: 0, cacheTokens: cch, outputTokens: out, cost, unitPriceInput: price.input, unitPriceOutput: price.output, priceMetadata: "codex-jsonl-v2", timestamp: new Date(e.timestamp), project },
-              create: { id: callId, source: "codex", model, inputTokens: inp, cacheCreationTokens: 0, cacheTokens: cch, outputTokens: out, cost, unitPriceInput: price.input, unitPriceOutput: price.output, priceMetadata: "codex-jsonl-v2", timestamp: new Date(e.timestamp), sessionId, project },
+              update: { model, inputTokens: inp, cacheCreationTokens: 0, cacheTokens: cache, outputTokens: out, cost, unitPriceInput: price.input, unitPriceOutput: price.output, priceMetadata: "codex-jsonl-v2", timestamp: new Date(e.timestamp), project },
+              create: { id: callId, source: "codex", model, inputTokens: inp, cacheCreationTokens: 0, cacheTokens: cache, outputTokens: out, cost, unitPriceInput: price.input, unitPriceOutput: price.output, priceMetadata: "codex-jsonl-v2", timestamp: new Date(e.timestamp), sessionId, project },
             });
             count++;
           } catch { /* skip malformed */ }
