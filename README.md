@@ -112,6 +112,59 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
+## Run with Docker
+
+The whole stack (dashboard + race-server) runs with Docker Compose. The container
+reads your local AI-tool logs from the host, so run it on the machine where you
+actually use the tools.
+
+**Prerequisites:** Docker + Docker Compose, and `cp .env.example .env`.
+
+### Option A — Bundled database (zero setup)
+
+Best for trying it out. Starts a throwaway PostgreSQL in a container; the app
+re-syncs your usage from the local tool logs on first run.
+
+```bash
+cp .env.example .env
+docker compose --profile bundled up -d --build
+```
+
+Open [http://localhost:3000](http://localhost:3000), then click **Sync** to populate it.
+
+### Option B — Your own host PostgreSQL (keep existing data)
+
+Connects to PostgreSQL already running on your machine, so your existing history
+shows up immediately.
+
+1. In `.env`, set `DATABASE_URL_DOCKER` (note `host.docker.internal`, not `localhost`):
+   ```env
+   DATABASE_URL_DOCKER=postgresql://postgres:PASSWORD@host.docker.internal:5432/token_dashboard?schema=public
+   ```
+2. Allow the container to reach your PostgreSQL (it listens on localhost by default):
+   - `postgresql.conf`: `listen_addresses = '*'`
+   - `pg_hba.conf`: add `host all all 172.16.0.0/12 scram-sha-256` (Docker's private subnet)
+   - restart PostgreSQL
+3. Start it:
+   ```bash
+   docker compose up -d --build
+   ```
+
+### Notes
+
+- **Log locations.** Defaults assume Windows. On macOS/Linux set `HOST_HOME` and
+  `VSCODE_USER_DIR` in `.env` (examples are in `.env.example`).
+- **Ports.** Override with `APP_PORT` / `RACE_PORT` in `.env` if 3000/9876 are taken.
+- **Race server.** Leave `RACE_SERVER_DATABASE_URL` unset to use the bundled db, or
+  set it (plus `JWT_SECRET` / `ADMIN_KEY`) to join a shared/remote race database.
+
+```bash
+docker compose logs -f app     # follow logs
+docker compose down            # stop (bundled db data is kept in a volume)
+```
+
+---
+
 ## Database Schema
 
 ```

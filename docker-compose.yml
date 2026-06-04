@@ -1,51 +1,100 @@
+# Two ways to run:
+#
+#   1. Bundled database (zero setup — for anyone who clones the repo):
+#        docker compose --profile bundled up -d --build
+#      Starts a throwaway PostgreSQL in a container; the app re-syncs your data
+#      from the local tool logs on first run.
+#
+#   2. Your own host PostgreSQL (keeps existing data — set DATABASE_URL_DOCKER in .env):
+#        docker compose up -d --build
+#      The app connects to PostgreSQL already running on your machine.
+#
+# All per-user values come from the root .env (see .env.example). Anything not set
+# falls back to the defaults below, which target the bundled database.
+
 services:
+  db:
+    image: postgres:17-alpine
+    profiles: ["bundled"]          # only starts with `--profile bundled`
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-token_dashboard}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_RACE_SERVER_URL: http://localhost:9876
+        NEXT_PUBLIC_RACE_SERVER_URL: ${NEXT_PUBLIC_RACE_SERVER_URL:-http://localhost:9876}
     restart: always
-    # Load everything from the project .env (DB creds, player name/password, period…).
-    env_file:
-      - ./.env
     environment:
-      # .env uses "localhost", which inside a container is the container itself — so the
-      # two values that must reach OUT of the container are overridden here:
-      #   DATABASE_URL host -> host.docker.internal (the machine running Docker)
-      #   RACE_SERVER_URL   -> race-server (the sibling container)
-      # (NEXT_PUBLIC_RACE_SERVER_URL stays localhost: it runs in the browser on the host.)
-      #
-      # DATABASE_URL is kept portable + secret-free: each user sets DATABASE_URL_DOCKER
-      # in their own (gitignored) .env. The default below is a generic placeholder that
-      # assumes a host PostgreSQL reachable via Docker Desktop.
-      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://postgres:postgres@host.docker.internal:5432/token_dashboard?schema=public}
-      RACE_SERVER_URL: http://race-server:9876
-      # Sync adapters read tool logs from os.homedir(); point HOME at the mounted host profile.
+      # Default points at the bundled db service. To use your own host PostgreSQL,
+      # set DATABASE_URL_DOCKER in .env using host.docker.internal as the host, e.g.
+      #   postgresql://postgres:PASS@host.docker.internal:5432/token_dashboard?schema=public
+      # (a container's "localhost" is the container itself, never the host machine).
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://postgres:postgres@db:5432/token_dashboard?schema=public}
+      # Browser-facing race URL (runs on the host -> localhost is correct).
+      NEXT_PUBLIC_RACE_SERVER_URL: ${NEXT_PUBLIC_RACE_SERVER_URL:-http://localhost:9876}
+      # Server-side race URL (app -> race-server container, by service name).
+      RACE_SERVER_URL: ${RACE_SERVER_URL_DOCKER:-http://race-server:9876}
+      RACE_PLAYER_NAME: ${RACE_PLAYER_NAME:-}
+      RACE_PLAYER_PASSWORD: ${RACE_PLAYER_PASSWORD:-}
+      RACE_PERIOD: ${RACE_PERIOD:-1d}
+      # Sync adapters read tool logs from os.homedir(); HOME points at the mounted profile.
       HOME: /host-home
     extra_hosts:
-      # Lets the container resolve the host on Linux too (Docker Desktop adds it automatically).
       - "host.docker.internal:host-gateway"
     volumes:
-      # Mount host AI-tool logs so the sync adapters can read them inside the container.
-      # Read-only where possible; .codex is read-write because its SQLite DB is in WAL
-      # mode and SQLite must write the -shm wal-index even for read-only opens (the
-      # adapter still opens the DB with { readonly: true }, so no rows change).
-      - ${USERPROFILE:-C:/Users/Admin}/.claude:/host-home/.claude:ro
-      - ${USERPROFILE:-C:/Users/Admin}/.gemini:/host-home/.gemini:ro
-      - ${USERPROFILE:-C:/Users/Admin}/.codex:/host-home/.codex
-      # Cline (globalStorage) + Copilot (workspaceStorage) both live under Code/User.
-      - ${USERPROFILE:-C:/Users/Admin}/AppData/Roaming/Code/User:/host-home/AppData/Roaming/Code/User:ro
+      # Host AI-tool logs, mounted read-only so the sync adapters can read them.
+      # HOST_HOME defaults to the Windows profile; on macOS/Linux set HOST_HOME=$HOME
+      # (and VSCODE_USER_DIR) in .env — see .env.example.
+      - ${HOST_HOME:-${USERPROFILE}}/.claude:/host-home/.claude:ro
+      - ${HOST_HOME:-${USERPROFILE}}/.gemini:/host-home/.gemini:ro
+      # .codex is read-write: its SQLite DB is WAL mode and SQLite must write the
+      # -shm wal-index even for read-only opens (adapter still opens { readonly: true }).
+      - ${HOST_HOME:-${USERPROFILE}}/.codex:/host-home/.codex
+      # Cline (globalStorage) + Copilot (workspaceStorage) live under the VS Code User dir.
+      # The container always reads it at the Windows-shaped path, so map your OS path here.
+      - ${VSCODE_USER_DIR:-${USERPROFILE}/AppData/Roaming/Code/User}:/host-home/AppData/Roaming/Code/User:ro
     ports:
-      - "3000:3000"
+      - "${APP_PORT:-3000}:3000"
+    healthcheck:
+      # race-server waits on this so the app migrates the schema FIRST when both
+      # share the bundled db (the app must create _prisma_migrations before
+      # race-server adds its race_* tables, else `migrate deploy` hits P3005).
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
 
   race-server:
     build:
       context: ./race-server
       dockerfile: Dockerfile
     restart: always
-    # race-server keeps its own .env (the shared remote race DB it already used).
-    env_file:
-      - ./race-server/.env
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      # Defaults to the bundled db. To join a shared/remote race DB, set
+      # RACE_SERVER_DATABASE_URL (+ JWT_SECRET / ADMIN_KEY) in .env.
+      DATABASE_URL: ${RACE_SERVER_DATABASE_URL:-postgresql://postgres:postgres@db:5432/token_dashboard?schema=public}
+      PORT: 9876
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      ADMIN_KEY: ${ADMIN_KEY:-admin}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
     ports:
-      - "9876:9876"
+      - "${RACE_PORT:-9876}:9876"
+
+volumes:
+  postgres_data:
