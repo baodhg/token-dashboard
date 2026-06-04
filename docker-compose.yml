@@ -1,0 +1,51 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_RACE_SERVER_URL: http://localhost:9876
+    restart: always
+    # Load everything from the project .env (DB creds, player name/password, period…).
+    env_file:
+      - ./.env
+    environment:
+      # .env uses "localhost", which inside a container is the container itself — so the
+      # two values that must reach OUT of the container are overridden here:
+      #   DATABASE_URL host -> host.docker.internal (the machine running Docker)
+      #   RACE_SERVER_URL   -> race-server (the sibling container)
+      # (NEXT_PUBLIC_RACE_SERVER_URL stays localhost: it runs in the browser on the host.)
+      #
+      # DATABASE_URL is kept portable + secret-free: each user sets DATABASE_URL_DOCKER
+      # in their own (gitignored) .env. The default below is a generic placeholder that
+      # assumes a host PostgreSQL reachable via Docker Desktop.
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://postgres:postgres@host.docker.internal:5432/token_dashboard?schema=public}
+      RACE_SERVER_URL: http://race-server:9876
+      # Sync adapters read tool logs from os.homedir(); point HOME at the mounted host profile.
+      HOME: /host-home
+    extra_hosts:
+      # Lets the container resolve the host on Linux too (Docker Desktop adds it automatically).
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Mount host AI-tool logs so the sync adapters can read them inside the container.
+      # Read-only where possible; .codex is read-write because its SQLite DB is in WAL
+      # mode and SQLite must write the -shm wal-index even for read-only opens (the
+      # adapter still opens the DB with { readonly: true }, so no rows change).
+      - ${USERPROFILE:-C:/Users/Admin}/.claude:/host-home/.claude:ro
+      - ${USERPROFILE:-C:/Users/Admin}/.gemini:/host-home/.gemini:ro
+      - ${USERPROFILE:-C:/Users/Admin}/.codex:/host-home/.codex
+      # Cline (globalStorage) + Copilot (workspaceStorage) both live under Code/User.
+      - ${USERPROFILE:-C:/Users/Admin}/AppData/Roaming/Code/User:/host-home/AppData/Roaming/Code/User:ro
+    ports:
+      - "3000:3000"
+
+  race-server:
+    build:
+      context: ./race-server
+      dockerfile: Dockerfile
+    restart: always
+    # race-server keeps its own .env (the shared remote race DB it already used).
+    env_file:
+      - ./race-server/.env
+    ports:
+      - "9876:9876"
