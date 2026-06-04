@@ -86,9 +86,9 @@ services:
       app:
         condition: service_healthy
     environment:
-      # Defaults to the bundled db. To join a shared/remote race DB, set
-      # RACE_SERVER_DATABASE_URL (+ JWT_SECRET / ADMIN_KEY) in .env.
-      DATABASE_URL: ${RACE_SERVER_DATABASE_URL:-postgresql://postgres:postgres@db:5432/token_dashboard?schema=public}
+      # Falls back to the app's DB (DATABASE_URL_DOCKER) when unset, then to the
+      # bundled db. Set RACE_SERVER_DATABASE_URL only to use a separate/remote race DB.
+      DATABASE_URL: ${RACE_SERVER_DATABASE_URL:-${DATABASE_URL_DOCKER:-postgresql://postgres:postgres@db:5432/token_dashboard?schema=public}}
       PORT: 9876
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       ADMIN_KEY: ${ADMIN_KEY:-admin}
