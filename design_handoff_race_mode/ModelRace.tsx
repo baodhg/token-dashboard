@@ -590,7 +590,39 @@ function createRockets() {
     ctx.restore();
   }
 
-  function drawBody(ctx: CanvasRenderingContext2D, color: string) {
+  function drawWingTrails(ctx: CanvasRenderingContext2D, history: any[], color: string, t: number) {
+    if (history.length < 2) return;
+    const latest = history[0];
+    const thrust = latest.thrust;
+    if (thrust < 0.2 && !latest.isRolling) return;
+    
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    
+    for (let wing = -1; wing <= 1; wing += 2) {
+      ctx.beginPath();
+      for (let i = 0; i < history.length; i++) {
+        const h = history[i];
+        const wingY = 19 * wing * Math.cos(h.roll);
+        const relX = h.x - latest.x - 16;
+        const relY = h.y - latest.y + wingY;
+        if (i === 0) ctx.moveTo(relX, relY); else ctx.lineTo(relX, relY);
+      }
+      ctx.lineCap = "round"; ctx.lineWidth = 1.5 + thrust * 2;
+      let relEndX = history[history.length - 1].x - latest.x;
+      if (Math.abs(relEndX) < 1) relEndX = -1;
+      const grad = ctx.createLinearGradient(0, 0, relEndX, 0);
+      grad.addColorStop(0, color); grad.addColorStop(0.2, color); grad.addColorStop(1, "transparent");
+      ctx.strokeStyle = grad; ctx.stroke();
+      ctx.lineWidth = 4 + thrust * 4;
+      const glow = ctx.createLinearGradient(0, 0, relEndX, 0);
+      glow.addColorStop(0, hexA(color, 0.5)); glow.addColorStop(1, "transparent");
+      ctx.strokeStyle = glow; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawBody(ctx: CanvasRenderingContext2D, color: string, thrust: number) {
     ctx.fillStyle = shade(color, -40); ctx.strokeStyle = color; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(4, -10); ctx.lineTo(16, -19); ctx.lineTo(24, -10); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(4, 10); ctx.lineTo(16, 19); ctx.lineTo(24, 10); ctx.closePath(); ctx.fill(); ctx.stroke();
@@ -623,6 +655,33 @@ function createRockets() {
     ctx.shadowBlur = 0;
     ctx.strokeStyle = "rgba(60,70,90,0.35)"; ctx.lineWidth = 0.6;
     [20, 34, 48].forEach((px) => { ctx.beginPath(); ctx.moveTo(px, -10.5); ctx.lineTo(px, 10.5); ctx.stroke(); });
+
+    // 🚀 Nosecone Glow (Heat buildup at high speed)
+    if (thrust > 0.6) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const gSize = 20 * (thrust - 0.5);
+      const nglow = ctx.createRadialGradient(84, 0, 0, 84, 0, gSize);
+      nglow.addColorStop(0, hexA(color, 0.8));
+      nglow.addColorStop(1, "transparent");
+      ctx.fillStyle = nglow;
+      ctx.beginPath(); ctx.arc(84, 0, gSize, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawShockwaves(ctx: CanvasRenderingContext2D, r: any) {
+    ctx.save();
+    ctx.translate(r.x + 30, r.y);
+    r.shockwaves.forEach((sw: any) => {
+      ctx.strokeStyle = `rgba(255, 255, 255, ${sw.a})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      // Ellipse expanding backwards
+      ctx.ellipse(-sw.r * 0.5, 0, sw.r * 0.4, sw.r, Math.PI/2, 0, TAU);
+      ctx.stroke();
+    });
+    ctx.restore();
   }
 
   return {
@@ -631,10 +690,20 @@ function createRockets() {
       const prev = new Map(rockets.map((r) => [r.model, r]));
       rockets = list.map((m, i) => {
         const old = prev.get(m.model);
+        const tokenJump = old ? m.totalTokens - old.totalTokens : 0;
+        let isRolling = old ? old.isRolling : false;
+        let rollVelocity = old ? old.rollVelocity : 0;
+        if (tokenJump > 0 && !isRolling) {
+           isRolling = true;
+           rollVelocity = 0.15 + Math.min(0.1, tokenJump / 5000);
+        }
         return {
           model: m.model, totalTokens: m.totalTokens, color: m.color, i,
           x: old ? old.x : 70, y: 0, seed: old ? old.seed : rnd(0, 1000),
           thrust: old ? old.thrust : 0, bob: old ? old.bob : rnd(0, TAU),
+          roll: old ? old.roll : 0, isRolling, rollVelocity,
+          speedAvg: old ? old.speedAvg : 0,
+          history: old && old.history ? old.history : [],
         };
       });
     },
@@ -660,15 +729,33 @@ function createRockets() {
         const prev = r.x;
         r.x += (target - r.x) * 0.045;
         const speed = Math.min(1, Math.abs(r.x - prev) / 2.2);
+
+        if (r.isRolling) {
+            r.roll += r.rollVelocity;
+            if (r.roll >= TAU) { r.roll = 0; r.isRolling = false; }
+        }
+
         r.thrust += (0.35 + speed * 0.65 - r.thrust) * 0.08;
         r.bob += 0.05;
         const y = laneAt(i) + Math.sin(r.bob) * 2.4;
         r.y = y;
+
+        r.history.unshift({ x: r.x, y: r.y, roll: r.roll, thrust: r.thrust, isRolling: r.isRolling });
+        if (r.history.length > 40) r.history.pop();
+
         if (Math.random() > 0.15) emitSparks(r.x - 6, y, r.color, r.thrust);
         ctx.save();
         ctx.translate(r.x, y);
+        
+        if (r.thrust > 0.4 || r.isRolling) drawWingTrails(ctx, r.history, r.color, t);
+        
         drawFlame(ctx, r.thrust, r.color, t, r.seed);
-        drawBody(ctx, r.color);
+        
+        ctx.save();
+        ctx.scale(1, Math.cos(r.roll));
+        drawBody(ctx, r.color, r.thrust);
+        ctx.restore();
+        
         ctx.restore();
         out.push({ model: r.model, x: r.x, y, color: r.color, totalTokens: r.totalTokens });
       });

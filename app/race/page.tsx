@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, Suspense, CSSProperties, useRef } fro
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LeaderboardPanel, HistoryPanel } from "@/components/RaceStatsPanels";
+import SkinShopModal from "@/components/SkinShopModal";
+import { updateCoinsFromTokens } from "@/lib/rocket-config";
 
 const MultiplayerRace = dynamic(
   () => import("@/components/MultiplayerRace"),
@@ -99,11 +101,6 @@ function Scanlines() {
 }
 
 // ── Auth Gate: VIEW gate, locked to this machine's .env racer ─────────────────
-// Identity is the machine's .env RACE_PLAYER_NAME (the actual racer). This gate
-// only guards *viewing* /race: the name is pre-filled + locked to machineName,
-// the user just enters the password, and login must succeed against the race
-// server for that exact name. No register tab — the server-side reporter
-// bootstraps the account on first sync.
 function AuthGate({ serverUrl, machineName, onAuth }: {
   serverUrl: string; machineName: string; onAuth: (s: Session) => void;
 }) {
@@ -129,9 +126,6 @@ function AuthGate({ serverUrl, machineName, onAuth }: {
     setLoading(true); setError("");
     try {
       let { res, data } = await tryLogin(name, p);
-      // Bootstrap race: a brand-new machine's account is registered by the
-      // server-side reporter on first sync (fire-and-forget). If login 404s,
-      // wait once for that to land, then retry.
       if (res.status === 404) {
         await new Promise((r) => setTimeout(r, 1500));
         ({ res, data } = await tryLogin(name, p));
@@ -169,7 +163,6 @@ function AuthGate({ serverUrl, machineName, onAuth }: {
         {machineName ? (
           <>
             <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "0.65rem" }}>
-              {/* Name is locked to this machine's racer — view only */}
               <input
                 value={machineName}
                 readOnly
@@ -313,25 +306,17 @@ function RaceContent() {
   const searchParams = useSearchParams();
 
   const initialSource = searchParams.get("source") || "all";
-  // Spectator (projector) mode: ?spectator=1 — this machine only displays the
-  // race. It does NOT call /api/sync (so it scans no local logs and never
-  // reports a total of its own), and it skips the auth gate entirely. All
-  // player data is read client-side from the race server via GET /live.
   const spectator = searchParams.get("spectator") === "1";
 
   const [source] = useState(initialSource);
   const [myTokens, setMyTokens] = useState(0);
   const [lastRefresh, setLastRefresh] = useState<number | null>(null);
-  // This machine's racer identity from .env (via /api/sync). Drives the login
-  // gate's locked name + the "me" badge. Empty until the first sync responds.
   const [machineName, setMachineName] = useState("");
 
-  // Auth state
   const [session, setSession] = useState<Session | null>(null);
   const [pendingChangePw, setPendingChangePw] = useState<{ name: string } | null>(null);
-  const [authReady, setAuthReady] = useState(false); // checked sessionStorage
+  const [authReady, setAuthReady] = useState(false);
 
-  // Splash gates
   const [introReady, setIntroReady] = useState(false);
   const [introFading, setIntroFading] = useState(false);
   useEffect(() => {
@@ -340,7 +325,6 @@ function RaceContent() {
     return () => { clearTimeout(fadeAt); clearTimeout(doneAt); };
   }, []);
 
-  // Restore session from sessionStorage + check pending change-pw
   useEffect(() => {
     const pending = sessionStorage.getItem(SESSION_KEY + "_pending");
     if (pending) {
@@ -358,19 +342,10 @@ function RaceContent() {
     setAuthReady(true);
   }, []);
 
-  // Poll the local DB (via /api/sync) every 10s to refresh my token total for
-  // the UI badge. /api/sync scans local logs → DB and reports up to the race
-  // server, returning the current totalTokens. Runs immediately on mount, then
-  // on POLL_MS interval; the interval is cleared on unmount.
   useEffect(() => {
-    // Spectator machines never sync: they have no local logs to report and
-    // must not appear as a racer. The live race data comes from /live instead.
     if (spectator) return;
     let alive = true;
     const pollDb = () => {
-      // Reporting is server-side via .env identity (race-reporter), so no token
-      // is sent here. We DO read back `playerName` (the machine's .env racer
-      // name) to drive the login gate's locked name field and the "me" badge.
       fetch("/api/sync", { method: "POST" })
         .then((r) => r.json())
         .then((d) => {
@@ -388,15 +363,12 @@ function RaceContent() {
     return () => { alive = false; clearInterval(id); };
   }, [spectator]);
 
-  // Keep the source filter in the URL (no re-fetch). The race uses a single
-  // fixed window (RACE_PERIOD on the server), so there is no client period.
   useEffect(() => {
     const params = new URLSearchParams();
     if (source !== "all") params.set("source", source);
     const qs = params.toString();
     router.replace(qs ? `/race?${qs}` : "/race", { scroll: false });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source]);
+  }, [source, router]);
 
   const handleExit = useCallback(() => {
     const params = new URLSearchParams();
@@ -436,7 +408,6 @@ function RaceContent() {
     );
   }
 
-  // Must change password (after admin reset)
   if (pendingChangePw) {
     return (
       <ChangePasswordGate
@@ -447,14 +418,12 @@ function RaceContent() {
     );
   }
 
-  // Not logged in
   if (!session) {
     return (
       <AuthGate
         serverUrl={RACE_SERVER_URL}
         machineName={machineName}
         onAuth={(s) => {
-          // Check if mustChangePassword triggered pending state
           const pending = sessionStorage.getItem(SESSION_KEY + "_pending");
           if (pending) {
             try { const p = JSON.parse(pending); setPendingChangePw({ name: p.name }); return; } catch { }
@@ -506,7 +475,6 @@ function ExitBtn({ onClick }: { onClick: () => void }) {
   );
 }
 
-// ── Tab pill — cyan glow when active, subtle lift on hover ────────────────────
 function TabBtn({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   const [hover, setHover] = useState(false);
   const on = active || hover;
@@ -527,13 +495,11 @@ function TabBtn({ active, label, onClick }: { active: boolean; label: string; on
   );
 }
 
-// ── Logout pill — first click arms a confirm prompt, second confirms ──────────
 function LogoutBtn({ onClick }: { onClick: () => void }) {
   const [hover, setHover] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Reset the armed state after a few seconds of inactivity.
   const arm = () => {
     setConfirming(true);
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -600,7 +566,6 @@ function LogoutBtn({ onClick }: { onClick: () => void }) {
   );
 }
 
-// ── Race shell with tab switcher ──────────────────────────────────────────────
 type Tab = "live" | "leaderboard" | "history";
 
 function RaceShell({ session, serverUrl, machineName = "", myTokens, lastRefresh, handleExit, handleLogout, spectator = false }: {
@@ -613,11 +578,14 @@ function RaceShell({ session, serverUrl, machineName = "", myTokens, lastRefresh
   handleLogout: () => void;
   spectator?: boolean;
 }) {
-  // The racer identity is the machine's .env name (fall back to the session
-  // display name, which is constrained to equal it). Empty in spectator mode.
   const meName = machineName || session.displayName;
   const [tab, setTab] = useState<Tab>("live");
+  const [shopOpen, setShopOpen] = useState(false);
   const mono: CSSProperties = { fontFamily: "ui-monospace, monospace" };
+
+  useEffect(() => {
+    if (myTokens > 0) updateCoinsFromTokens(myTokens);
+  }, [myTokens]);
 
   return (
     <div className="fixed inset-0 bg-[#03040a]" style={{ display: "flex", flexDirection: "column" }}>
@@ -631,6 +599,19 @@ function RaceShell({ session, serverUrl, machineName = "", myTokens, lastRefresh
         <TabBtn active={tab === "live"}        label="🚀 Live"     onClick={() => setTab("live")} />
         <TabBtn active={tab === "leaderboard"} label="🏆 All-Time" onClick={() => setTab("leaderboard")} />
         <TabBtn active={tab === "history"}     label="📈 History"  onClick={() => setTab("history")} />
+        <span style={{ width: 1, height: 14, background: "rgba(255,255,255,0.1)" }} />
+        <button
+          onClick={() => setShopOpen(true)}
+          style={{
+            fontFamily: "ui-monospace, monospace", fontSize: 11, fontWeight: 900,
+            background: "linear-gradient(45deg, #ffd700, #ff8c00)",
+            border: "none", color: "#000", borderRadius: 12, padding: "4px 12px",
+            cursor: "pointer", boxShadow: "0 0 10px rgba(255,215,0,0.3)",
+            display: "flex", alignItems: "center", gap: 4
+          }}
+        >
+          <span style={{ fontSize: 13 }}>🛒</span> SHOP
+        </button>
         {lastRefresh && tab === "live" && (
           <span style={{ ...mono, fontSize: 9, color: "rgba(255,255,255,0.18)", paddingLeft: 4 }}>
             {new Date(lastRefresh).toLocaleTimeString()}
@@ -644,10 +625,10 @@ function RaceShell({ session, serverUrl, machineName = "", myTokens, lastRefresh
         )}
       </div>
 
-      {/* Back button */}
+      <SkinShopModal isOpen={shopOpen} onClose={() => setShopOpen(false)} />
+
       <ExitBtn onClick={handleExit} />
 
-      {/* Content */}
       {tab === "live" && (
         <MultiplayerRace
           serverUrl={serverUrl}

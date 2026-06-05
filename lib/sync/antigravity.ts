@@ -104,8 +104,17 @@ async function syncTranscriptFile(filePath: string, conversationId: string, hist
   const fullText = buf.toString("utf-8");
   const lines = fullText.split("\n");
   let count = 0;
-  
+
   let currentModel = "Gemini 3.5 Flash (Medium)";
+
+  if (lastSize > BigInt(0)) {
+    const lastCall = await prisma.call.findFirst({
+      where: { sessionId: `antigravity_${conversationId}` },
+      orderBy: { timestamp: "desc" },
+      select: { model: true },
+    });
+    if (lastCall?.model) currentModel = lastCall.model;
+  }
 
   let lastUserPromptLength = 0;
 
@@ -116,9 +125,7 @@ async function syncTranscriptFile(filePath: string, conversationId: string, hist
 
     // Parse model changes and track prompt length from USER_INPUT / USER_EXPLICIT content
     if ((entry.type === "USER_INPUT" || entry.source === "USER_EXPLICIT") && entry.content) {
-      // Extract model selection change
-      // Format: Model Selection from None to Gemini 3.5 Flash (Medium)
-      const modelMatch = entry.content.match(/Model Selection` from \S+ to (.+?)\.\s+No need to/);
+      const modelMatch = entry.content.match(/Model Selection` from .+? to (.+?)\.\s+No need to/);
       if (modelMatch && modelMatch[1]) {
         currentModel = modelMatch[1].trim();
       }
