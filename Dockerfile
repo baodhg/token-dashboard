@@ -41,8 +41,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # Prisma's schema engine (used by `prisma migrate deploy` in start.sh) needs
-# openssl at runtime; node:22-slim does not ship it.
-RUN apt-get update && apt-get install -y openssl ca-certificates \
+# openssl at runtime; node:22-slim does not ship it. tzdata lets the TZ env var
+# (set in docker-compose) resolve to a real zone — without it Date.getHours()
+# stays on UTC and the dashboard charts shift by the host's offset (e.g. -7h).
+RUN apt-get update && apt-get install -y openssl ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 1001 nodejs

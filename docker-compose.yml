@@ -49,6 +49,10 @@ services:
       RACE_PLAYER_NAME: ${RACE_PLAYER_NAME:-}
       RACE_PLAYER_PASSWORD: ${RACE_PLAYER_PASSWORD:-}
       RACE_PERIOD: ${RACE_PERIOD:-1d}
+      # Chart time-bucketing uses the server's local time (Date.getHours/getDate).
+      # Without this a UTC container shifts every hour/day bucket by the host offset
+      # (e.g. -7h for Vietnam). Defaults to Asia/Ho_Chi_Minh; override TZ in .env.
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
       # Sync adapters read tool logs from os.homedir(); HOME points at the mounted profile.
       HOME: /host-home
     extra_hosts:
@@ -90,6 +94,7 @@ services:
       # bundled db. Set RACE_SERVER_DATABASE_URL only to use a separate/remote race DB.
       DATABASE_URL: ${RACE_SERVER_DATABASE_URL:-${DATABASE_URL_DOCKER:-postgresql://postgres:postgres@db:5432/token_dashboard?schema=public}}
       PORT: 9876
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       ADMIN_KEY: ${ADMIN_KEY:-admin}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
