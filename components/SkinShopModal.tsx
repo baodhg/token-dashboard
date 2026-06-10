@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { X, ShoppingBag, Check, Lock, Zap, RefreshCw, History } from "lucide-react";
 import { getRocketConfig, saveRocketConfig, RocketConfig } from "@/lib/rocket-config";
-import { drawFlame, drawCyberUFO, drawCyberCruiser, drawCyberJet, drawCyberInterceptor, drawNeonSpeeder, drawCyberDrone } from "@/lib/rocket-renderer";
+import { drawFlame, drawSkin } from "@/lib/rocket-renderer";
 
 interface Skin {
   id: string;
@@ -13,13 +13,47 @@ interface Skin {
   description: string;
 }
 
+// Catalog — order = display order in the shop, prices ascending. Prices (USD)
+// MUST match SKIN_PRICES in race-server/server.js (server-authoritative) and the
+// skin ids MUST match the keys in SKIN_RENDERERS in lib/rocket-renderer.ts.
 const SKINS: Skin[] = [
-  { id: "default",     name: "Cyber Cruiser",   price: 0,  icon: "🚀", description: "Standard high-velocity interceptor." },
-  { id: "ufo",         name: "Neon Saucer",      price: 5,  icon: "🛸", description: "Extraterrestrial tech with tractor beam." },
-  { id: "drone",       name: "Cyber Drone",      price: 10, icon: "🛰️", description: "Surveillance core with glowing orbital rings." },
-  { id: "plane",       name: "Paper Dart",       price: 15, icon: "✈️", description: "Lightweight, agile, surprisingly fast." },
-  { id: "speeder",     name: "Neon Speeder",     price: 20, icon: "🏎️", description: "Pod-racer inspired with dual engines." },
-  { id: "interceptor", name: "Star Interceptor", price: 30, icon: "⚔️", description: "X-wing styled high-combat speeder." },
+  { id: "default",     name: "Cyber Cruiser",    price: 0,    icon: "🚀", description: "Standard high-velocity interceptor." },
+  { id: "dart",        name: "Dart Arrow",       price: 8,    icon: "🎯", description: "Slim arrowhead with swept tail fins." },
+  { id: "ufo",         name: "Neon Saucer",      price: 12,   icon: "🛸", description: "Extraterrestrial tech with tractor beam." },
+  { id: "delta",       name: "Delta Wing",       price: 18,   icon: "🔺", description: "Broad flying wing, pure forward thrust." },
+  { id: "drone",       name: "Cyber Drone",      price: 25,   icon: "🛰️", description: "Surveillance core with orbital rings." },
+  { id: "plane",       name: "Paper Dart",       price: 35,   icon: "✈️", description: "Lightweight, agile, surprisingly fast." },
+  { id: "shuttle",     name: "Orbital Shuttle",  price: 45,   icon: "🛫", description: "Heavy-lift body with swept wings." },
+  { id: "speeder",     name: "Neon Speeder",     price: 60,   icon: "🏎️", description: "Pod-racer with twin podded engines." },
+  { id: "fighter",     name: "Delta Fighter",    price: 75,   icon: "🛩️", description: "Twin-tail dogfighter with a glass canopy." },
+  { id: "stealth",     name: "Stealth Wing",     price: 95,   icon: "🦇", description: "Flat radar-dark chevron, low signature." },
+  { id: "interceptor", name: "Star Interceptor", price: 120,  icon: "⚔️", description: "X-wing styled high-combat speeder." },
+  { id: "raptor",      name: "Raptor",           price: 145,  icon: "🦅", description: "Forward-swept wings, built to strike." },
+  { id: "manta",       name: "Manta Ray",        price: 175,  icon: "🐟", description: "Organic glider with wide curved wings." },
+  { id: "needle",      name: "Void Needle",      price: 210,  icon: "📍", description: "Ultra-thin hypersonic spike." },
+  { id: "tie",         name: "Hex Fighter",      price: 250,  icon: "🔷", description: "Twin hex panels around a central pod." },
+  { id: "viper",       name: "Viper Mk II",      price: 300,  icon: "🐍", description: "Cylindrical hull, triple rear thrusters." },
+  { id: "trident",     name: "Trident",          price: 360,  icon: "🔱", description: "Three-prong fork bristling with energy." },
+  { id: "crystal",     name: "Crystal Shard",    price: 430,  icon: "💎", description: "Faceted gemstone hull, refracts light." },
+  { id: "phoenix",     name: "Phoenix",          price: 520,  icon: "🔥", description: "Living wings that flare and flap." },
+  { id: "wasp",        name: "Wasp Striker",     price: 620,  icon: "🐝", description: "Segmented body tipped with a stinger." },
+  { id: "falcon",      name: "Star Falcon",      price: 750,  icon: "🦉", description: "Disc hull with forward mandibles." },
+  { id: "orbiter",     name: "Satellite Orbiter",price: 900,  icon: "📡", description: "Core module flanked by solar arrays." },
+  { id: "mothership",  name: "Mothership",       price: 1100, icon: "🌌", description: "Hex carrier dotted with running lights." },
+  { id: "comet",       name: "Comet",            price: 1350, icon: "☄️", description: "Glowing icy head trailing frozen streaks." },
+  { id: "ring",        name: "Halo Ring",        price: 1700, icon: "💍", description: "Spinning torus around a plasma core." },
+  { id: "dreadnought", name: "Dreadnought",      price: 2200, icon: "🛡️", description: "Layered battleship bristling with turrets." },
+  // ── Premium spacecraft tier — real-craft inspired, each with a signature FX ──
+  { id: "dragon",      name: "Crew Dragon",      price: 2600,  icon: "🐉", description: "Gumdrop capsule + trunk · twinkling Draco RCS." },
+  { id: "falcon9",     name: "Falcon Booster",   price: 3000,  icon: "🛬", description: "Grid-fin stage that twitches · landing burn pulse." },
+  { id: "apollo",      name: "Apollo CSM",       price: 3600,  icon: "🌗", description: "Command cone + bell · spinning dish + RCS puffs." },
+  { id: "soyuz",       name: "Soyuz",            price: 4200,  icon: "⚛️", description: "Orbital sphere + descent bell · solar glint sweep." },
+  { id: "starship",    name: "Starship",         price: 5000,  icon: "🌠", description: "Stainless hull + flaps · reflective sheen + Raptors." },
+  { id: "lunar",       name: "Lunar Module",     price: 6000,  icon: "🌙", description: "Angular lander on legs · gold-foil shimmer." },
+  { id: "saturnv",     name: "Saturn V",         price: 7200,  icon: "🗼", description: "Three-stage stack + escape tower · vernier flicker." },
+  { id: "voyager",     name: "Voyager Probe",    price: 8800,  icon: "🪐", description: "High-gain dish + booms · expanding signal rings." },
+  { id: "iss",         name: "Orbital Station",  price: 11000, icon: "🏗️", description: "Truss + modules · sun-tracking arrays + beacon." },
+  { id: "enterprise",  name: "Warp Cruiser",     price: 15000, icon: "🖖", description: "Saucer + warp nacelles · pulsing glow + warp streaks." },
 ];
 
 const SKIN_NAME: Record<string, string> = Object.fromEntries(SKINS.map((s) => [s.id, s.name]));
@@ -31,6 +65,16 @@ const COLORS = [
   { name: "Matrix",    hex: "#00ff41" },
   { name: "Cyan",      hex: "#00ffff" },
   { name: "Blood Red", hex: "#ff0000" },
+  { name: "Orange",    hex: "#ff7a00" },
+  { name: "Violet",    hex: "#8b5cf6" },
+  { name: "Sky",       hex: "#38bdf8" },
+  { name: "Lime",      hex: "#a3e635" },
+  { name: "Magenta",   hex: "#ff00ff" },
+  { name: "Crimson",   hex: "#dc143c" },
+  { name: "Emerald",   hex: "#10b981" },
+  { name: "Amber",     hex: "#ffbf00" },
+  { name: "Silver",    hex: "#c0c0c0" },
+  { name: "White",     hex: "#ffffff" },
 ];
 
 const FLAME_COLORS = [
@@ -39,6 +83,13 @@ const FLAME_COLORS = [
   { name: "Plasma Blue",      hex: "#00bfff" },
   { name: "Void Purple",      hex: "#a855f7" },
   { name: "Pink",             hex: "#ff1493" },
+  { name: "Crimson",          hex: "#ff2d2d" },
+  { name: "White-Hot",        hex: "#e6f7ff" },
+  { name: "Solar Gold",       hex: "#ffd24a" },
+  { name: "Cyan",             hex: "#00ffff" },
+  { name: "Lime",             hex: "#b6ff00" },
+  { name: "Magenta",          hex: "#ff00ff" },
+  { name: "Ice",              hex: "#9fe8ff" },
 ];
 
 function Scanlines() {
@@ -163,23 +214,10 @@ export default function SkinShopModal({
       ctx.save();
       ctx.translate(cx, cy);
       drawFlame(ctx, thrust, color, flameColor, t, 123, boost);
-
-      if (previewSkinId === "ufo") {
-        drawCyberUFO(ctx, color, thrust, t, roll, SHIP_SIZE);
-      } else if (previewSkinId === "plane") {
-        drawCyberJet(ctx, color, thrust);
-      } else if (previewSkinId === "interceptor") {
-        drawCyberInterceptor(ctx, color, true, Math.sin(roll) * 0.05);
-      } else if (previewSkinId === "speeder") {
-        drawNeonSpeeder(ctx, color, thrust);
-      } else if (previewSkinId === "drone") {
-        drawCyberDrone(ctx, color, t);
-      } else {
-        ctx.save();
-        ctx.scale(1.2, 1.2);
-        drawCyberCruiser(ctx, color, true, Math.sin(roll) * 0.05);
-        ctx.restore();
-      }
+      ctx.save();
+      ctx.scale(1.15, 1.15);
+      drawSkin(ctx, previewSkinId, color, { thrust, t, roll, tilt: Math.sin(roll) * 0.05, isMe: true, size: SHIP_SIZE });
+      ctx.restore();
       ctx.restore();
       raf = requestAnimationFrame(render);
     };
@@ -196,8 +234,12 @@ export default function SkinShopModal({
   // Buy a skin — fully server-authoritative. The server validates ownership and
   // recomputes the wallet, then returns the updated profile we apply verbatim.
   const handleBuy = async (skin: Skin) => {
-    if (!canWrite) { setError("Log in to the race to buy"); return; }
-    if (availableCoins < skin.price) return;
+    if (!canWrite) { setError("Enter the race (log in) to buy ships."); return; }
+    // Client-side pre-check for instant feedback — the server re-checks anyway.
+    if (availableCoins < skin.price) {
+      setError(`Not enough coins — "${skin.name}" costs $${skin.price.toFixed(2)}, you have $${availableCoins.toFixed(2)}. Burn more tokens to earn coins.`);
+      return;
+    }
     setBusy(true); setError(null);
     try {
       const res = await fetch(`${serverUrl}/shop/buy`, {
@@ -205,12 +247,27 @@ export default function SkinShopModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, skinId: skin.id }),
       });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || "Purchase failed"); return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Map server status codes to clear, actionable messages.
+        const msg =
+          res.status === 402 ? `Not enough coins for "${skin.name}".`
+          : res.status === 409 ? `You already own "${skin.name}".`
+          : res.status === 401 ? "Session expired — re-enter the race."
+          : res.status === 400 ? "That ship doesn't exist."
+          : (data.error || "Purchase failed — try again.");
+        setError(msg);
+        // A 409 means our local view is stale; resync from the server.
+        if (res.status === 409) {
+          fetch(`${serverUrl}/shop/profile?name=${encodeURIComponent(playerName!)}`)
+            .then((r) => r.json()).then(applyProfile).catch(() => {});
+        }
+        return;
+      }
       applyProfile(data);
       refreshPurchases();
     } catch {
-      setError("Cannot reach race server");
+      setError("Cannot reach race server.");
     } finally {
       setBusy(false);
     }

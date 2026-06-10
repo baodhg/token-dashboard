@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { getRocketConfig } from "@/lib/rocket-config";
-import { drawFlame, drawCyberCruiser, drawCyberUFO, drawCyberJet, drawCyberInterceptor, drawNeonSpeeder, drawCyberDrone, shade, hexA } from "@/lib/rocket-renderer";
+import { drawFlame, drawSkin, hexA } from "@/lib/rocket-renderer";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface PlayerStat {
@@ -619,20 +619,7 @@ function createPlayerRockets() {
         const flameColor = (cfg && cfg.flameColor) ? cfg.flameColor : (r.flameColor || null);
 
         drawFlame(ctx, r.thrust, color, flameColor, t, r.seed, boost);
-
-        if (skin === 'ufo') {
-           drawCyberUFO(ctx, color, r.thrust, t, t*2.5, 64);
-        } else if (skin === 'plane') {
-           drawCyberJet(ctx, color, r.thrust);
-        } else if (skin === 'interceptor') {
-           drawCyberInterceptor(ctx, color, r.isMe, r.tilt);
-        } else if (skin === 'speeder') {
-           drawNeonSpeeder(ctx, color, r.thrust);
-        } else if (skin === 'drone') {
-           drawCyberDrone(ctx, color, t);
-        } else {
-           drawCyberCruiser(ctx, color, r.isMe, r.tilt);
-        }
+        drawSkin(ctx, skin, color, { thrust: r.thrust, t, roll: t * 2.5, tilt: r.tilt, isMe: r.isMe, size: 64 });
         ctx.restore();
         // Trend flashes only while inside its hold window, then settles to "same".
         const trendActive = r.trend !== "same" && clock < r.trendUntil;
