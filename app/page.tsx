@@ -427,6 +427,11 @@ const [customRange, setCustomRange] = useState(() => ({
       .finally(() => setSyncing(false));
   };
 
+  const filtersRef = useRef({ period, source, customRange });
+  useEffect(() => {
+    filtersRef.current = { period, source, customRange };
+  }, [period, source, customRange]);
+
   const handleRecalculate = () => {
     setRecalculating(true);
     setRecalcMsg(null);
@@ -436,8 +441,9 @@ const [customRange, setCustomRange] = useState(() => ({
         if (res.error) { setRecalcMsg(`Error: ${res.error}`); return; }
         setRecalcMsg(`Updated ${res.updated ?? 0} records`);
         // Refresh stats to show updated costs
-        const qs = new URLSearchParams({ period, ...(source !== "all" ? { source } : {}) });
-        if (period === "custom") { qs.append("from", customRange.from); qs.append("to", customRange.to); }
+        const curr = filtersRef.current;
+        const qs = new URLSearchParams({ period: curr.period, ...(curr.source !== "all" ? { source: curr.source } : {}) });
+        if (curr.period === "custom") { qs.append("from", curr.customRange.from); qs.append("to", curr.customRange.to); }
         fetch(`/api/token-stats?${qs}`).then(r => r.json()).then(result => {
           setData(result);
           if (glowTimerRef.current) clearTimeout(glowTimerRef.current);
@@ -452,10 +458,12 @@ const [customRange, setCustomRange] = useState(() => ({
 
   // Smart Polling
   useEffect(() => {
+    let active = true;
     const interval = setInterval(() => {
       fetch("/api/sync", { method: "POST" })
         .then(r => r.json())
         .then(res => {
+          if (!active) return;
           if (res.synced > 0) {
             setLastSynced(Date.now());
             // Implicitly re-fetch data
@@ -467,6 +475,7 @@ const [customRange, setCustomRange] = useState(() => ({
             fetch(`/api/token-stats?${qs}`)
               .then(r => r.json())
               .then(result => {
+                if (!active) return;
                 setData(result);
                 if (glowTimerRef.current) clearTimeout(glowTimerRef.current);
                 setIsPollGlow(true);
@@ -478,7 +487,10 @@ const [customRange, setCustomRange] = useState(() => ({
         .catch(() => {});
     }, 5000); // Poll every 5 seconds
 
-    return () => clearInterval(interval);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, [period, source, customRange.from, customRange.to]);
 
   const summary      = data?.summary      ?? EMPTY_SUMMARY;

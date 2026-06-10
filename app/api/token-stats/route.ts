@@ -12,6 +12,7 @@ const PERIOD_MS: Record<Exclude<Period, "custom">, number> = {
 
 const MODEL_LABEL: Record<string, string> = {
   // Claude — base IDs and versioned suffixes (e.g. claude-opus-4-7-20250219)
+  "claude-fable-5":            "Fable 5",
   "claude-opus-4-8":           "Opus 4.8",
   "claude-opus-4-7":           "Opus 4.7",
   "claude-opus-4-6":           "Opus 4.6",

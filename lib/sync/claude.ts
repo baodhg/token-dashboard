@@ -14,6 +14,8 @@ import type { ModelPrice, SyncResult } from "./types";
 // cacheWrite uses 1h price — Claude Code uses ephemeral_1h by default
 // cacheRead = 0.1× input  |  cacheWrite(1h) = 2× input  |  cacheWrite(5m) = 1.25× input
 const PRICES: Record<string, ModelPrice> = {
+  // Fable 5 — new tier above Opus, $10 input (verified 2026-06-10)
+  "claude-fable-5":            { input: 10,    output: 50,    cacheRead: 1,      cacheWrite: 20    },
   // Opus 4.x new generation — $5 input (NOT the old $15 Opus 4.1 price)
   "claude-opus-4-8":           { input: 5,     output: 25,    cacheRead: 0.5,    cacheWrite: 10    },
   "claude-opus-4-7":           { input: 5,     output: 25,    cacheRead: 0.5,    cacheWrite: 10    },
@@ -39,6 +41,7 @@ function getPrice(model: string): ModelPrice {
   for (const [key, price] of Object.entries(PRICES)) {
     if (m.startsWith(key.toLowerCase())) return price;
   }
+  if (m.includes("fable"))  return { input: 10,  output: 50,  cacheRead: 1,    cacheWrite: 20  }; // Fable tier default
   if (m.includes("opus"))   return { input: 5,   output: 25,  cacheRead: 0.5,  cacheWrite: 10  }; // Opus 4.5+ default
   if (m.includes("haiku"))  return { input: 1,   output: 5,   cacheRead: 0.1,  cacheWrite: 2   };
   return                           { input: 3,   output: 15,  cacheRead: 0.3,  cacheWrite: 6   }; // sonnet default

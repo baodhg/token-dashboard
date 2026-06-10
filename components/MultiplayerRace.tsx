@@ -2,6 +2,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { getRocketConfig } from "@/lib/rocket-config";
+import { drawFlame, drawCyberCruiser, drawCyberUFO, drawCyberJet, drawCyberInterceptor, drawNeonSpeeder, drawCyberDrone, shade, hexA } from "@/lib/rocket-renderer";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface PlayerStat {
@@ -181,19 +183,6 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${to(r)}${to(g)}${to(b)}`;
 }
 
-function shade(hex: string, amt: number): string {
-  if (!hex || hex[0] !== "#") return hex || "#888";
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.max(0, Math.min(255, (n >> 16) + amt));
-  const g = Math.max(0, Math.min(255, ((n >> 8) & 255) + amt));
-  const b = Math.max(0, Math.min(255, (n & 255) + amt));
-  return `rgb(${r},${g},${b})`;
-}
-function hexA(hex: string, a: number): string {
-  if (!hex || hex[0] !== "#") return hex;
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
-}
 
 function fmt(v: number): string {
   return v >= 1_000_000 ? `${(v / 1_000_000).toFixed(2)}M`
@@ -440,186 +429,8 @@ function createPlayerRockets() {
     ctx.globalAlpha = 1;
   }
 
-  function plumeCone(ctx: CanvasRenderingContext2D, length: number, halfW: number, sway: number, t: number, seed: number, freq: number) {
-    // Width profile: NARROW at the throat (x=0) so the plume erupts from a tight
-    // engine mouth that the ship's nozzle covers — no flame spilling past the
-    // hull sides — then bulges open and tapers to a point at the tail. This is
-    // both more realistic and fixes the "gap" where a wide-at-origin cone poked
-    // out beyond the nozzle face.
-    // Throat must keep the WIDEST flame layer (haze, halfW = wid*2.3) within the
-    // ship's nozzle half-height even at full burst, or the plume spills past the
-    // hull. Worst case wid≈22 → 22*2.3*0.18 ≈ 9.3, under NOZZLE_H (11). At cruise
-    // it reads as a tight high-pressure jet.
-    const THROAT = 0.18; // width at x=0 as a fraction of halfW
-    const widthAt = (u: number) => {
-      // bulge: rises from THROAT to 1.0 around u≈0.3, then tapers toward 0.
-      const open = THROAT + (1 - THROAT) * Math.sin(Math.min(u / 0.3, 1) * (Math.PI / 2));
-      const tail = 1 - Math.pow(u, 1.4); // smooth taper to the tail tip
-      return halfW * open * tail;
-    };
-    const seg = 12; ctx.beginPath();
-    ctx.moveTo(0, -widthAt(0));
-    for (let i = 0; i <= seg; i++) {
-      const u = i / seg; const x = -u * length; const w = widthAt(u);
-      const wob = Math.sin(t * 1.6 + u * 6 * freq + seed) * halfW * 0.18 * u;
-      ctx.lineTo(x, -w + wob + sway * u);
-    }
-    ctx.lineTo(-length, sway);
-    for (let i = seg; i >= 0; i--) {
-      const u = i / seg; const x = -u * length; const w = widthAt(u);
-      const wob = Math.sin(t * 1.6 + u * 6 * freq + seed + 2) * halfW * 0.18 * u;
-      ctx.lineTo(x, w + wob + sway * u);
-    }
-    ctx.closePath(); ctx.fill();
-  }
 
-  function drawFlame(ctx: CanvasRenderingContext2D, thrust: number, color: string, t: number, seed: number, boost: number) {
-    const fl = 0.78 + Math.sin(t * 0.6 + seed) * 0.14 + Math.sin(t * 1.7 + seed * 2) * 0.08;
-    const len = (54 + thrust * 150) * fl * (1 + boost * 1.5);
-    const wid = (7 + thrust * 7) * (1 + boost * 0.6);
-    const sway = Math.sin(t * 0.9 + seed) * 2.2 * thrust;
-    ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = 0.5;
-    const haze = ctx.createLinearGradient(0, 0, -len * 1.15, 0);
-    haze.addColorStop(0, "rgba(255,120,30,0.55)"); haze.addColorStop(0.4, "rgba(190,60,12,0.28)"); haze.addColorStop(1, "rgba(60,20,6,0)");
-    ctx.fillStyle = haze; plumeCone(ctx, len * 1.15, wid * 2.3, sway, t, seed, 0.5);
-    ctx.globalAlpha = 0.85;
-    const orange = ctx.createLinearGradient(0, 0, -len, 0);
-    orange.addColorStop(0, "rgba(255,180,60,0.95)"); orange.addColorStop(0.35, "rgba(255,110,20,0.8)"); orange.addColorStop(1, "rgba(150,40,10,0)");
-    ctx.fillStyle = orange; plumeCone(ctx, len, wid * 1.55, sway, t, seed, 1);
-    ctx.globalAlpha = 0.95;
-    const yellow = ctx.createLinearGradient(0, 0, -len * 0.7, 0);
-    yellow.addColorStop(0, "rgba(255,244,200,1)"); yellow.addColorStop(0.45, "rgba(255,210,90,0.9)"); yellow.addColorStop(1, "rgba(255,140,30,0)");
-    ctx.fillStyle = yellow; plumeCone(ctx, len * 0.7, wid * 1.0, sway, t, seed, 1.4);
-    const core = ctx.createLinearGradient(0, 0, -len * 0.42, 0);
-    core.addColorStop(0, "rgba(255,255,255,1)"); core.addColorStop(0.5, "rgba(220,240,255,0.85)"); core.addColorStop(1, "rgba(180,210,255,0)");
-    ctx.fillStyle = core; plumeCone(ctx, len * 0.42, wid * 0.5, sway * 0.5, t, seed, 2);
-    ctx.globalAlpha = 0.6;
-    const tint = ctx.createRadialGradient(-2, 0, 0, -2, 0, wid * 1.6);
-    tint.addColorStop(0, color); tint.addColorStop(1, "transparent");
-    ctx.fillStyle = tint; ctx.beginPath(); ctx.arc(-2, 0, wid * 1.6, 0, TAU); ctx.fill();
-    ctx.globalAlpha = 0.9;
-    const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, wid * 2.2);
-    bloom.addColorStop(0, "rgba(255,255,255,0.95)"); bloom.addColorStop(0.4, "rgba(255,200,90,0.6)"); bloom.addColorStop(1, "transparent");
-    ctx.fillStyle = bloom; ctx.beginPath(); ctx.arc(0, 0, wid * 2.2, 0, TAU); ctx.fill();
-    ctx.restore();
-  }
 
-  // Rocket: render player as an aggressive CYBER battlecruiser — a heavy,
-  // hard-edged hull with armored plating, twin neon strakes, a flat engine
-  // NOZZLE that meets the flame, big swept wings, and a hot energy core.
-  // Faces +x. The exhaust nozzle is a flat face at x≈0 (the flame origin), so
-  // the plume erupts straight out of the engine — no gap. The name lives in the
-  // HUD label, so no letter is drawn.
-  function drawRocketBody(ctx: CanvasRenderingContext2D, color: string, _name: string, isMe: boolean, tilt: number = 0) {
-    const R = isMe ? 30 : 24;
-    ctx.save();
-    ctx.scale(R / 22, R / 22);
-    ctx.rotate(tilt);
-    ctx.lineJoin = "miter";
-    ctx.miterLimit = 8;
-
-    const neon = shade(color, 95);
-    const dark = shade(color, -58);
-    const NOZZLE_H = 11; // half-height of the flat engine face at the tail (x=0); must cover the flame throat
-
-    // Hull silhouette — heavy dart with a FLAT tail nozzle (x=0) meeting the
-    // flame, stepped armor shoulders, and a long sharp nose (x=50).
-    const hull = (c: CanvasRenderingContext2D) => {
-      c.beginPath();
-      c.moveTo(50, 0);              // nose tip
-      c.lineTo(30, -6);             // nose shoulder (upper)
-      c.lineTo(24, -11);            // armor step out (upper)
-      c.lineTo(13, -13);            // wide mid hull (upper)
-      c.lineTo(4, -NOZZLE_H);       // slight vault into the nozzle (upper)
-      c.lineTo(0, -NOZZLE_H);       // FLAT nozzle top
-      c.lineTo(0, NOZZLE_H);        // FLAT nozzle bottom
-      c.lineTo(4, NOZZLE_H);        // slight vault into the nozzle (lower)
-      c.lineTo(13, 13);             // wide mid hull (lower)
-      c.lineTo(24, 11);             // armor step out (lower)
-      c.lineTo(30, 6);              // nose shoulder (lower)
-      c.closePath();
-    };
-
-    // ── Big swept wings (behind hull), aggressive rake ───────────────────────
-    ctx.fillStyle = dark;
-    ctx.strokeStyle = neon; ctx.lineWidth = 1.2;
-    ctx.shadowColor = color; ctx.shadowBlur = isMe ? 6 : 4;
-    // top wing
-    ctx.beginPath();
-    ctx.moveTo(20, -9); ctx.lineTo(10, -28); ctx.lineTo(0, -26); ctx.lineTo(2, -11); ctx.lineTo(8, -10);
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-    // bottom wing
-    ctx.beginPath();
-    ctx.moveTo(20, 9); ctx.lineTo(10, 28); ctx.lineTo(0, 26); ctx.lineTo(2, 11); ctx.lineTo(8, 10);
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // ── Hull fill: dark armored metal, bright energized leading edge ─────────
-    const body = ctx.createLinearGradient(0, 0, 50, 0);
-    body.addColorStop(0, shade(color, -60));
-    body.addColorStop(0.45, shade(color, -25));
-    body.addColorStop(0.8, color);
-    body.addColorStop(1, neon);
-    ctx.fillStyle = body;
-    hull(ctx); ctx.fill();
-
-    // ── Cockpit / Canopy ──────────────────────────────────────────────────────
-    const canopy = ctx.createLinearGradient(14, -4, 28, 6);
-    canopy.addColorStop(0, "#0a1a2a");
-    canopy.addColorStop(0.5, "#4affe0"); // Cyan glass reflection
-    canopy.addColorStop(1, "#ffffff");
-    ctx.fillStyle = canopy;
-    ctx.beginPath();
-    ctx.moveTo(18, -4); ctx.lineTo(28, -2); ctx.lineTo(26, 2); ctx.lineTo(14, 4);
-    ctx.closePath(); ctx.fill();
-
-    // ── Panel lines (subtle hull details) ─────────────────────────────────────
-    ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(13, -13); ctx.lineTo(13, 13); // Vertical seam
-    ctx.moveTo(4, -NOZZLE_H); ctx.lineTo(24, 0); // Diagonal seam
-    ctx.stroke();
-
-    // ── Armor plate shading — a darker belly wedge for volume ────────────────
-    ctx.globalAlpha = 0.4; ctx.fillStyle = shade(color, -70);
-    ctx.beginPath();
-    ctx.moveTo(0, NOZZLE_H); ctx.lineTo(13, 13); ctx.lineTo(24, 11); ctx.lineTo(30, 6);
-    ctx.lineTo(30, 2); ctx.lineTo(6, 3); ctx.closePath(); ctx.fill();
-    ctx.globalAlpha = 1;
-
-    // ── Twin neon strakes running the length of the hull ─────────────────────
-    ctx.strokeStyle = neon; ctx.lineWidth = 1.4;
-    ctx.shadowColor = color; ctx.shadowBlur = 5;
-    ctx.beginPath(); ctx.moveTo(7, -5); ctx.lineTo(30, -3.5); ctx.lineTo(44, 0); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(7, 5); ctx.lineTo(30, 3.5); ctx.lineTo(44, 0); ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // ── Engine vents — glowing slits on the nozzle face ──────────────────────
-    ctx.strokeStyle = "#ffffff"; ctx.globalAlpha = 0.85; ctx.lineWidth = 1.6;
-    ctx.shadowColor = color; ctx.shadowBlur = 6;
-    ctx.beginPath(); ctx.moveTo(1, -NOZZLE_H + 2); ctx.lineTo(1, NOZZLE_H - 2); ctx.stroke();
-    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
-
-    // ── Heavy hull outline — white+glow for "me", neon for others ────────────
-    ctx.shadowColor = color;
-    ctx.shadowBlur = isMe ? 12 : 8;
-    ctx.strokeStyle = isMe ? "#ffffff" : neon;
-    ctx.lineWidth = isMe ? 2.2 : 1.6;
-    hull(ctx); ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // ── Energy core — hot glowing reactor eye ────────────────────────────────
-    const core = ctx.createRadialGradient(28, 0, 0, 28, 0, 7);
-    core.addColorStop(0, "#ffffff");
-    core.addColorStop(0.4, neon);
-    core.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = core;
-    ctx.beginPath(); ctx.arc(28, 0, 6, 0, TAU); ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath(); ctx.arc(28, 0, 1.8, 0, TAU); ctx.fill();
-
-    ctx.restore();
-  }
 
   return {
     setPlayers(list: Array<{ name: string; totalTokens: number; color: string; isMe: boolean; totalCost?: number | null }>) {
@@ -790,8 +601,26 @@ function createPlayerRockets() {
           ctx.restore();
         }
 
-        drawFlame(ctx, r.thrust, r.color, t, r.seed, boost);
-        drawRocketBody(ctx, r.color, r.name, r.isMe, r.tilt);
+        const cfg = typeof window !== "undefined" && r.isMe ? getRocketConfig() : null;
+        const color = (cfg && cfg.selectedColor) ? cfg.selectedColor : r.color;
+        const skin = (cfg && cfg.selectedSkin) ? cfg.selectedSkin : 'default';
+        const flameColor = (cfg && cfg.flameColor) ? cfg.flameColor : null;
+
+        drawFlame(ctx, r.thrust, color, flameColor, t, r.seed, boost);
+
+        if (skin === 'ufo') {
+           drawCyberUFO(ctx, color, r.thrust, t, t*2.5, 64);
+        } else if (skin === 'plane') {
+           drawCyberJet(ctx, color, r.thrust);
+        } else if (skin === 'interceptor') {
+           drawCyberInterceptor(ctx, color, r.isMe, r.tilt);
+        } else if (skin === 'speeder') {
+           drawNeonSpeeder(ctx, color, r.thrust);
+        } else if (skin === 'drone') {
+           drawCyberDrone(ctx, color, t);
+        } else {
+           drawCyberCruiser(ctx, color, r.isMe, r.tilt);
+        }
         ctx.restore();
         // Trend flashes only while inside its hold window, then settles to "same".
         const trendActive = r.trend !== "same" && clock < r.trendUntil;

@@ -48,6 +48,22 @@ function extractProject(cwd: string): string | null {
   return parts[parts.length - 1] ?? null;
 }
 
+// rollout_path in state_5.sqlite is an absolute path written by the Codex CLI on
+// the HOST OS (e.g. C:\Users\Admin\.codex\...). When this app runs inside Docker
+// (Linux, HOME=/host-home) that path never exists, which silently flipped every
+// session to the aggregate fallback and deleted accurate per-request records.
+// Remap the portion after ".codex" onto this process's homedir before testing.
+function resolveRolloutPath(p: string | null): string | null {
+  if (!p) return null;
+  if (existsSync(p)) return p;
+  const norm = p.replace(/\\/g, "/");
+  const marker = "/.codex/";
+  const idx = norm.toLowerCase().indexOf(marker);
+  if (idx === -1) return null;
+  const remapped = join(homedir(), ".codex", ...norm.slice(idx + marker.length).split("/"));
+  return existsSync(remapped) ? remapped : null;
+}
+
 // ── JSONL rollout shape ───────────────────────────────────────────────────────
 interface CodexTokenUsage {
   input_tokens?:            number;
@@ -94,15 +110,15 @@ async function syncFromSQLite(): Promise<number> {
     const fallback = thread.model || "codex";
     const sessionId = `codex_${thread.id}`;
 
-    const hasJSONL = !!(thread.rollout_path && existsSync(thread.rollout_path));
+    const rolloutPath = resolveRolloutPath(thread.rollout_path);
 
-    if (hasJSONL) {
+    if (rolloutPath) {
       // ── Per-request mode: parse each token_count event as its own DB record ──
       // Matches Claude Code granularity. Track model switches via session_meta.
       const keptIds: string[] = [];
       let currentModel = fallback;
       let content = "";
-      try { content = await readFile(thread.rollout_path!, "utf-8"); } catch { /* fall through to aggregate */ }
+      try { content = await readFile(rolloutPath, "utf-8"); } catch { /* fall through to aggregate */ }
 
       if (content) {
         for (const line of content.split("\n")) {
@@ -146,8 +162,8 @@ async function syncFromSQLite(): Promise<number> {
         }
 
         // Mark JSONL as fully processed so syncJSONLFile skips it (avoids double-count)
-        const syncKey  = `codex:${thread.rollout_path!}`;
-        const fileSize = BigInt((await stat(thread.rollout_path!)).size);
+        const syncKey  = `codex:${rolloutPath}`;
+        const fileSize = BigInt((await stat(rolloutPath)).size);
         await prisma.syncState.upsert({
           where:  { filePath: syncKey },
           update: { lastSize: fileSize },
@@ -162,6 +178,15 @@ async function syncFromSQLite(): Promise<number> {
 
     } else {
       // ── Aggregate fallback: no JSONL available, use SQLite total ──
+      // Safety guard: if accurate per-request records already exist for this
+      // session (synced earlier while the JSONL was still readable), keep them.
+      // Replacing them with a single input-only total is strictly worse data —
+      // this is what wiped out correct stats when rollout paths didn't resolve.
+      const perRequestCount = await prisma.call.count({
+        where: { source: "codex", id: { startsWith: `codex_${thread.id}_` } },
+      });
+      if (perRequestCount > 0) continue;
+
       const model  = fallback;
       const price  = getPrice(thread.model);
       const callId = `codex_thread_${thread.id}`;

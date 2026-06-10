@@ -95,9 +95,11 @@ export default function SettingsPage() {
   const [lang, setLang]   = useState<Lang>("vi");
   const [rocketConfig, setRocketConfig] = useState<RocketConfig>({ 
     selectedColor: null, 
+    flameColor: null,
     selectedSkin: 'default',
     unlockedSkins: ['default'],
     virtualCoins: 0,
+    spentCoins: 0,
     lastTotalTokens: 0
   });
 

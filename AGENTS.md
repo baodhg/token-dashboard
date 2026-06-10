@@ -261,12 +261,14 @@ Source: anthropic.com/pricing, verified 2026-05-22. `cacheWrite` = 1h ephemeral 
 Two functions run in sequence:
 
 1. **`syncFromSQLite()`** — iterates every thread with `tokens_used > 0`
-   - If `thread.rollout_path` exists on disk → **per-request mode**:
+   - `rollout_path` is recorded by the Codex CLI on the HOST OS (e.g. `C:\Users\...`). `resolveRolloutPath()` remaps the part after `.codex` onto the current `homedir()` so the check also works inside Docker (`HOME=/host-home`). Never test `existsSync(thread.rollout_path)` directly — that bug once flipped every session to aggregate fallback inside the container and deleted all accurate per-request records.
+   - If the resolved rollout file exists → **per-request mode**:
      - Reads the entire rollout JSONL, tracks model via `turn_context` events, creates one DB record per `token_count` event
      - Record ID format: `codex_{thread_uuid}_{iso_timestamp}`
      - After processing, sets `syncState.lastSize = fileSize` so `syncJSONLFile` skips this file
      - Runs `deleteMany` to clean up any stale aggregate or old-format records for the same session
    - If rollout file is missing → **aggregate fallback**:
+     - **Guard:** if per-request records (`codex_{uuid}_*`) already exist for the session, the fallback is skipped entirely — never replace accurate per-request data with an input-only total
      - Creates a single record `codex_thread_{thread_uuid}` using `tokens_used` from SQLite
      - Also runs `deleteMany` to remove any stale per-request records
 

@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getRocketConfig, RocketConfig } from "@/lib/rocket-config";
-import { drawFlame, drawUFO, drawHighQualityRocket, hexA, shade, TAU } from "@/lib/rocket-renderer";
+import { drawFlame, drawCyberUFO, drawCyberCruiser, drawCyberJet, drawCyberInterceptor, drawNeonSpeeder, drawCyberDrone, hexA, shade, TAU } from "@/lib/rocket-renderer";
 
 export interface RaceModelStat {
   model: string;
@@ -137,8 +137,8 @@ function createRockets() {
     ctx.save(); ctx.globalCompositeOperation = "lighter"; const aura = ctx.createRadialGradient(0, 0, SHIP_SIZE * 0.2, 0, 0, auraR);
     aura.addColorStop(0, hexA(r.color, (0.22 + pulse * 0.12) * (0.5 + rankGlow * 0.5))); aura.addColorStop(1, "transparent");
     ctx.fillStyle = aura; ctx.beginPath(); ctx.arc(0, 0, auraR, 0, TAU); ctx.fill(); ctx.restore();
-    if (skinId === 'ufo') { drawUFO(ctx, r.color, r.thrust, t, r.roll, SHIP_SIZE); } 
-    else { ctx.save(); ctx.scale(0.55, 0.55); ctx.scale(1, Math.cos(r.roll)); drawHighQualityRocket(ctx, r.color, r.thrust); ctx.restore(); }
+    if (skinId === 'ufo') { drawCyberUFO(ctx, r.color, r.thrust, t, r.roll, SHIP_SIZE); } 
+    else { ctx.save(); ctx.scale(0.55, 0.55); ctx.scale(1, Math.cos(r.roll)); drawCyberCruiser(ctx, r.color, true); ctx.restore(); }
   }
 
   return {
@@ -159,7 +159,8 @@ function createRockets() {
         r.x += (target - r.x) * 0.05; r.bob += 0.05; const y = laneAt(i) + Math.sin(r.bob) * 2.4;
         if (r.isRolling) { r.roll += r.rollVelocity; if (r.roll >= TAU) { r.roll = 0; r.isRolling = false; } }
         if (r.thrust > 0.7) { r.roll += 0.15; if (r.roll >= TAU) r.roll -= TAU; }
-        ctx.save(); ctx.translate(r.x, y); drawFlame(ctx, r.thrust, r.color, t, r.seed, r.burstTimer / BURST_FRAMES); drawShip(ctx, r, t, uCfg || null, i); ctx.restore();
+        const flameColor = uCfg ? uCfg.flameColor : null;
+        ctx.save(); ctx.translate(r.x, y); drawFlame(ctx, r.thrust, r.color, flameColor, t, r.seed, r.burstTimer / BURST_FRAMES); drawShip(ctx, r, t, uCfg || null, i); ctx.restore();
         out.push({ model: r.model, x: r.x, y, color: r.color, totalTokens: r.totalTokens, bursting: r.burstTimer > 0, trend: "same" });
       });
       drawSparks(ctx); return out;

@@ -6,6 +6,8 @@ import { calcCost, type ModelPrice } from "./sync/types";
 // Source: anthropic.com/pricing (verified 2026-05-22)
 // cacheWrite uses 1h price — Claude Code uses ephemeral_1h by default
 const CLAUDE_PRICES: Record<string, ModelPrice> = {
+  // Fable 5 — new tier above Opus, $10 input (verified 2026-06-10)
+  "claude-fable-5":            { input: 10,    output: 50,    cacheRead: 1,      cacheWrite: 20    },
   // Opus 4.x new generation — $5 input
   "claude-opus-4-8":           { input: 5,     output: 25,    cacheRead: 0.5,    cacheWrite: 10    },
   "claude-opus-4-7":           { input: 5,     output: 25,    cacheRead: 0.5,    cacheWrite: 10    },
@@ -70,6 +72,7 @@ function getPrice(source: string, model: string | null): ModelPrice | null {
     for (const [key, price] of Object.entries(CLAUDE_PRICES)) {
       if (ml.startsWith(key.toLowerCase())) return price;
     }
+    if (ml.includes("fable"))  return { input: 10,  output: 50,  cacheRead: 1,    cacheWrite: 20  }; // Fable tier default
     if (ml.includes("opus"))   return { input: 5,   output: 25,  cacheRead: 0.5,  cacheWrite: 10  }; // Opus 4.5+ default
     if (ml.includes("haiku"))  return { input: 1,   output: 5,   cacheRead: 0.1,  cacheWrite: 2   };
     return                            { input: 3,   output: 15,  cacheRead: 0.3,  cacheWrite: 6   };
@@ -83,6 +86,7 @@ function getPrice(source: string, model: string | null): ModelPrice | null {
       for (const [key, price] of Object.entries(CLAUDE_PRICES)) {
         if (ml.startsWith(key.toLowerCase())) return price;
       }
+      if (ml.includes("fable")) return { input: 10, output: 50, cacheRead: 1,  cacheWrite: 20 };
       if (ml.includes("opus"))  return { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 10 };
       if (ml.includes("haiku")) return { input: 1, output: 5,  cacheRead: 0.1, cacheWrite: 2  };
       return                           { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 6  };

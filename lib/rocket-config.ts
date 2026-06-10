@@ -1,9 +1,11 @@
 
 export interface RocketConfig {
   selectedColor: string | null;
+  flameColor: string | null; // Null means default orange/yellow flame
   selectedSkin: string;
   unlockedSkins: string[]; // List of skin IDs user owns
-  virtualCoins: number;   // Coins earned from tokens
+  virtualCoins: number;   // Total coins earned from tokens
+  spentCoins: number;     // Coins spent in the shop
   lastTotalTokens: number; // Last recorded total tokens to track delta
 }
 
@@ -11,9 +13,11 @@ const STORAGE_KEY = 'rocket_dashboard_config';
 
 const DEFAULT_CONFIG: RocketConfig = {
   selectedColor: null,
+  flameColor: null,
   selectedSkin: 'default',
   unlockedSkins: ['default'],
   virtualCoins: 0,
+  spentCoins: 0,
   lastTotalTokens: 0,
 };
 
