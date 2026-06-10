@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LeaderboardPanel, HistoryPanel } from "@/components/RaceStatsPanels";
 import SkinShopModal from "@/components/SkinShopModal";
-import { updateCoinsFromTokens } from "@/lib/rocket-config";
 
 const MultiplayerRace = dynamic(
   () => import("@/components/MultiplayerRace"),
@@ -583,9 +582,6 @@ function RaceShell({ session, serverUrl, machineName = "", myTokens, lastRefresh
   const [shopOpen, setShopOpen] = useState(false);
   const mono: CSSProperties = { fontFamily: "ui-monospace, monospace" };
 
-  useEffect(() => {
-    if (myTokens > 0) updateCoinsFromTokens(myTokens);
-  }, [myTokens]);
 
   return (
     <div className="fixed inset-0 bg-[#03040a]" style={{ display: "flex", flexDirection: "column" }}>
@@ -625,7 +621,7 @@ function RaceShell({ session, serverUrl, machineName = "", myTokens, lastRefresh
         )}
       </div>
 
-      <SkinShopModal isOpen={shopOpen} onClose={() => setShopOpen(false)} />
+      <SkinShopModal isOpen={shopOpen} onClose={() => setShopOpen(false)} playerName={meName} />
 
       <ExitBtn onClick={handleExit} />
 

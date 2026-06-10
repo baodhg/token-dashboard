@@ -51,3 +51,26 @@ model SyncState {
 
   @@map("sync_state")
 }
+
+model RocketProfile {
+  playerName    String   @id
+  selectedSkin  String   @default("default")
+  selectedColor String?
+  flameColor    String?
+  unlockedSkins String[] @default(["default"])
+  spentCoins    Float    @default(0)
+  updatedAt     DateTime @updatedAt @default(now())
+
+  @@map("rocket_profiles")
+}
+
+model DailyBalance {
+  date        String
+  model       String
+  source      String
+  dailyCost   Float  @default(0)
+  dailyTokens Int    @default(0)
+
+  @@id([date, model, source])
+  @@map("daily_balances")
+}

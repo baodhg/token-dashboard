@@ -93,14 +93,12 @@ function ThemeCard({ theme, selected, onSelect }: { theme: Theme; selected: bool
 export default function SettingsPage() {
   const [theme, setTheme] = useState<Theme>("system");
   const [lang, setLang]   = useState<Lang>("vi");
-  const [rocketConfig, setRocketConfig] = useState<RocketConfig>({ 
-    selectedColor: null, 
+  const [rocketConfig, setRocketConfig] = useState<RocketConfig>({
+    selectedColor: null,
     flameColor: null,
-    selectedSkin: 'default',
-    unlockedSkins: ['default'],
-    virtualCoins: 0,
+    selectedSkin: "default",
+    unlockedSkins: ["default"],
     spentCoins: 0,
-    lastTotalTokens: 0
   });
 
   useEffect(() => {

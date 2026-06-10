@@ -8,6 +8,7 @@ import { syncCursor      } from "@/lib/sync/cursor";
 import { syncAntigravity } from "@/lib/sync/antigravity";
 import { prisma          } from "@/lib/db";
 import { reportToRace   } from "@/lib/race-reporter";
+import { snapshotDailyBalances } from "@/lib/daily-snapshot";
 
 // Period window boundaries — mirrors the logic in token-stats/route.ts
 function periodWindow(period: string): { since: Date; to: Date } {
@@ -64,6 +65,9 @@ export async function POST() {
 
   // Fire-and-forget push to race server
   reportToRace(totalTokens, totalCost, racePeriod).catch(() => {});
+
+  // Snapshot daily balances (fire-and-forget — non-critical)
+  snapshotDailyBalances().catch(() => {});
 
   return Response.json({
     synced:      get(claude) + get(cline) + get(codex) + get(gemini) + get(copilot) + get(cursor) + get(antigravity),
