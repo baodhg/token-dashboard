@@ -454,6 +454,80 @@ The UI "Recalc $" button in the header triggers this endpoint and refetches stat
 | `copilot` | Always `0` — subscription billing |
 | `cursor` | Always `0` — subscription billing |
 
+## Multiplayer Race & Shop (race-server)
+
+The `/race` and `/live` screens are a multiplayer game on top of usage data. They
+talk to a **separate, standalone server** in `race-server/` (plain Node `http` +
+raw `pg`, NOT Next.js, NOT Prisma) backed by a **shared PostgreSQL DB** that all
+friends point at. This is a different DB from the dashboard's local `calls` DB.
+
+### Two databases — do not confuse them
+
+| DB | Owner | Accessed via | Tables |
+|---|---|---|---|
+| Dashboard DB | Each machine, private | Prisma (`lib/db.ts`) | `calls`, `sync_state`, `price_configs`, `daily_balances` |
+| Race DB | One shared instance everyone connects to | raw `pg` in `race-server/server.js` | `race_users`, `race_snapshots`, `race_shop_profiles`, `race_purchases` |
+
+### Data flow
+
+- Each dashboard syncs its own logs → local `calls`.
+- On every sync, `app/api/sync/route.ts` aggregates the race-window totals and
+  calls `reportToRace(totalTokens, totalCost, period, lifetimeCost)`
+  (`lib/race-reporter.ts`) → `POST {RACE_SERVER_URL}/report`. The reporter
+  auto-logins with `RACE_PLAYER_NAME`/`RACE_PLAYER_PASSWORD` and caches a JWT.
+  - `totalCost` = windowed USD (resets with the race window; shown on the board).
+  - `lifetimeCost` = all-time `SUM(calls.cost)` → feeds the shop wallet.
+- `components/MultiplayerRace.tsx` polls `GET {serverUrl}/live` every 5s and
+  renders the canvas. `/race` competes; `/live` is a read-only projector
+  (spectator) screen.
+
+### Shop = single source of truth on the shared DB
+
+The rocket shop (skins, colors, plasma color, wallet, purchase history) lives
+**entirely on the race-server**, so every player AND every spectator sees the
+same ship per player. (It used to live in a per-machine Prisma `rocket_profiles`
+table + `/api/rocket-profile` — both removed. `lib/rocket-config.ts` localStorage
+is kept only as an instant-preview cache for the *current* player between polls.)
+
+- `race_shop_profiles(player_name PK, selected_skin, selected_color, flame_color,
+  unlocked_skins[], spent_coins, total_earned)` — keyed by `player_name` =
+  `race_snapshots.player_name` = JWT `display_name`, so `/live` LEFT JOINs it.
+- `race_purchases(player_name, skin_id, price, purchased_at)` — append-only log.
+- **Wallet:** `availableCoins = total_earned − spent_coins` (floored at 0),
+  always recomputed **server-side** — never trusted from the client.
+  `total_earned` is set by `/report` via `GREATEST(existing, lifetimeCost)`
+  (monotonic + idempotent, so a partial sync can't shrink the wallet).
+
+### Race-server endpoints
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `POST /report` | JWT | Insert snapshot; upsert `total_earned` from `lifetimeCost` |
+| `GET /live` | public | Latest snapshot per player today + LEFT JOIN skin/color/flame |
+| `GET /shop/profile?name=` | public | Profile + derived `availableCoins` |
+| `GET /shop/purchases?name=` | public | Purchase history |
+| `POST /shop/buy` | JWT | Server-authoritative buy — price from `SKIN_PRICES`, wallet recomputed under `SELECT … FOR UPDATE`, writes profile + `race_purchases` in one txn |
+| `POST /shop/equip` | JWT | Cosmetic change (skin must be owned; colors are `#hex` or null) |
+
+`SKIN_PRICES` in `race-server/server.js` is the authoritative price list and must
+stay in sync with the `SKINS` array in `components/SkinShopModal.tsx`.
+
+### Non-obvious rules
+
+- **Stateless server (do not break):** the race-server keeps NO in-memory player
+  state. Every write touches only the JWT-authenticated player's own row. Buying
+  uses a row-locked transaction. This is what makes multiple instances against
+  one shared DB safe (no split-brain). Never reintroduce in-memory aggregates.
+- **Never trust client coins/prices.** `/shop/buy` ignores any client-sent price
+  and recomputes `availableCoins` itself.
+- **Schema is additive + idempotent.** `initDb()` uses `CREATE TABLE IF NOT
+  EXISTS`, so restarting the shared server is enough to create the shop tables —
+  friends don't migrate anything for the race DB.
+- **Cosmetics render for everyone.** `MultiplayerRace.frame()` reads
+  `skin/hullColor/flameColor` per rocket from `/live`. The `/live` field `color`
+  (chosen hull color) is renamed to `hullColor` on the client so it doesn't
+  collide with the name-hash race/HUD color.
+
 ## Read API Behavior
 
 `app/api/token-stats/route.ts` does the following:

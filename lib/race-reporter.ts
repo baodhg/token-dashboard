@@ -55,7 +55,14 @@ async function getToken(): Promise<string | null> {
   return login();
 }
 
-export async function reportToRace(totalTokens: number, totalCost: number | null = null, period = RACE_PERIOD): Promise<void> {
+export async function reportToRace(
+  totalTokens: number,
+  totalCost: number | null = null,
+  period = RACE_PERIOD,
+  // All-time USD spend on tokens — feeds the shared shop wallet (total_earned).
+  // Separate from totalCost, which is the per-race-window cost shown on the board.
+  lifetimeCost: number | null = null,
+): Promise<void> {
   if (!RACE_SERVER_URL || !RACE_PLAYER_NAME || !RACE_PLAYER_PASS) return;
 
   const token = await getToken();
@@ -65,7 +72,7 @@ export async function reportToRace(totalTokens: number, totalCost: number | null
     fetch(`${RACE_SERVER_URL}/report`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: t, totalTokens, totalCost, period }),
+      body: JSON.stringify({ token: t, totalTokens, totalCost, period, lifetimeCost }),
     });
 
   let res = await doReport(token);

@@ -12,6 +12,12 @@ export interface PlayerStat {
   /** USD spent in the race window. null when the server/reporter didn't send it. */
   totalCost?: number | null;
   updatedAt: number;
+  /** Equipped skin id from the shared shop. Defaults to "default" server-side. */
+  skin?: string;
+  /** Chosen hull color hex from the shop (server field `color`). null = auto. */
+  hullColor?: string | null;
+  /** Chosen plasma/exhaust color hex from the shop. null = auto. */
+  flameColor?: string | null;
 }
 
 interface MultiplayerRaceProps {
@@ -433,7 +439,7 @@ function createPlayerRockets() {
 
 
   return {
-    setPlayers(list: Array<{ name: string; totalTokens: number; color: string; isMe: boolean; totalCost?: number | null }>) {
+    setPlayers(list: Array<{ name: string; totalTokens: number; color: string; isMe: boolean; totalCost?: number | null; skin?: string; hullColor?: string | null; flameColor?: string | null }>) {
       const newMax = Math.max(1, ...list.map((p) => p.totalTokens));
       const prev = new Map(rockets.map((r: any) => [r.name, r]));
       rockets = list.map((p, i) => {
@@ -458,6 +464,8 @@ function createPlayerRockets() {
         }
         return {
           name: p.name, totalTokens: p.totalTokens, color: p.color, isMe: p.isMe, i,
+          // Cosmetics from the shared shop — drives the ship every spectator sees.
+          skin: p.skin || "default", hullColor: p.hullColor ?? null, flameColor: p.flameColor ?? null,
           x: old ? old.x : 70, y: old && old.y !== undefined ? old.y : null,
           tilt: old ? old.tilt || 0 : 0,
           seed: old ? old.seed : rnd(0, 1000),
@@ -601,10 +609,14 @@ function createPlayerRockets() {
           ctx.restore();
         }
 
+        // Cosmetics are shared via the server (r.skin/hullColor/flameColor), so
+        // EVERY ship renders with its owner's purchased skin and colors — not
+        // just "me". The local config is only an instant-preview overlay for the
+        // current player, bridging the gap until the next /live poll lands.
         const cfg = typeof window !== "undefined" && r.isMe ? getRocketConfig() : null;
-        const color = (cfg && cfg.selectedColor) ? cfg.selectedColor : r.color;
-        const skin = (cfg && cfg.selectedSkin) ? cfg.selectedSkin : 'default';
-        const flameColor = (cfg && cfg.flameColor) ? cfg.flameColor : null;
+        const skin = (cfg && cfg.selectedSkin) ? cfg.selectedSkin : (r.skin || 'default');
+        const color = (cfg && cfg.selectedColor) ? cfg.selectedColor : (r.hullColor || r.color);
+        const flameColor = (cfg && cfg.flameColor) ? cfg.flameColor : (r.flameColor || null);
 
         drawFlame(ctx, r.thrust, color, flameColor, t, r.seed, boost);
 
@@ -737,7 +749,10 @@ export default function MultiplayerRace({ serverUrl, playerName, myTokens, onExi
       fetch(`${serverUrl}/live`)
         .then((r) => r.json())
         .then((d) => {
-          setPlayers(d.players ?? []);
+          // Server sends the chosen hull color as `color`; rename it to
+          // `hullColor` so the per-player race/HUD color (a name hash, set in
+          // rankedPlayers) doesn't clobber the player's actual ship color.
+          setPlayers((d.players ?? []).map((p: any) => ({ ...p, hullColor: p.color ?? null })));
           setConnected(true);
         })
         .catch(() => setConnected(false));

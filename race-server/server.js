@@ -19,6 +19,43 @@ function startOfLocalDay() {
   return new Date(localMidnight - offsetMs);
 }
 
+// ── Shop catalog ────────────────────────────────────────────────────────────
+// Server-authoritative skin prices (USD). The buy endpoint NEVER trusts the
+// price sent by the client — it looks the skin up here. Keep this in sync with
+// the SKINS list in components/SkinShopModal.tsx.
+const SKIN_PRICES = {
+  default: 0,
+  ufo: 5,
+  drone: 10,
+  plane: 15,
+  speeder: 20,
+  interceptor: 30,
+};
+const DEFAULT_UNLOCKED = ["default"];
+
+// Read a player's shop profile (or a sane default), shaping it for the client.
+// availableCoins is always derived here (total_earned - spent_coins, floored at
+// 0) — the source of truth for what the player can spend.
+async function getShopProfile(playerName) {
+  const { rows } = await db.query(
+    "SELECT * FROM race_shop_profiles WHERE player_name = $1",
+    [playerName]
+  );
+  const p = rows[0];
+  const totalEarned = p ? Number(p.total_earned) : 0;
+  const spentCoins = p ? Number(p.spent_coins) : 0;
+  return {
+    playerName,
+    selectedSkin: p ? p.selected_skin : "default",
+    selectedColor: p ? p.selected_color : null,
+    flameColor: p ? p.flame_color : null,
+    unlockedSkins: p ? p.unlocked_skins : DEFAULT_UNLOCKED,
+    spentCoins,
+    totalEarned,
+    availableCoins: Math.max(0, totalEarned - spentCoins),
+  };
+}
+
 // ── PostgreSQL ────────────────────────────────────────────────────────────────
 if (!process.env.DATABASE_URL) {
   console.error("FATAL: DATABASE_URL is required");
@@ -51,6 +88,36 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS race_snapshots_player_time
       ON race_snapshots (player_name, recorded_at DESC);
+
+    -- ── Shop (shared) ─────────────────────────────────────────────────────────
+    -- The single source of truth for every player's rocket cosmetics + wallet.
+    -- Lives on the SHARED race DB so every dashboard/spectator sees the same
+    -- ship, color and plasma per player. Keyed by player_name = the display_name
+    -- written into race_snapshots, so /live can LEFT JOIN it directly.
+    --   total_earned = lifetime USD spent on tokens, pushed by each player's own
+    --   reporter (idempotent, set via GREATEST). availableCoins is always derived
+    --   server-side as total_earned - spent_coins, never trusted from the client.
+    CREATE TABLE IF NOT EXISTS race_shop_profiles (
+      player_name    TEXT PRIMARY KEY,
+      selected_skin  TEXT NOT NULL DEFAULT 'default',
+      selected_color TEXT,                              -- hull color hex, NULL = auto
+      flame_color    TEXT,                              -- plasma color hex, NULL = auto
+      unlocked_skins TEXT[] NOT NULL DEFAULT ARRAY['default'],
+      spent_coins    DOUBLE PRECISION NOT NULL DEFAULT 0,
+      total_earned   DOUBLE PRECISION NOT NULL DEFAULT 0,
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    -- Append-only purchase log. One row per skin bought.
+    CREATE TABLE IF NOT EXISTS race_purchases (
+      id           BIGSERIAL PRIMARY KEY,
+      player_name  TEXT NOT NULL,
+      skin_id      TEXT NOT NULL,
+      price        DOUBLE PRECISION NOT NULL,
+      purchased_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS race_purchases_player
+      ON race_purchases (player_name, purchased_at DESC);
   `);
   console.log("[db] tables ready");
 }
@@ -110,13 +177,20 @@ const httpServer = createServer(async (req, res) => {
   // boundary — players who don't report today drop off the board until they do.
   if (urlPath === "/live" && req.method === "GET") {
     try {
+      // LEFT JOIN the shared shop profile so every spectator renders each
+      // player's actual ship: skin, hull color and plasma color. Players with no
+      // profile yet just come back with nulls → client falls back to defaults.
       const { rows } = await db.query(`
-        SELECT DISTINCT ON (player_name)
-          player_name AS name, total_tokens AS "totalTokens",
-          total_cost AS "totalCost", recorded_at AS "updatedAt"
-        FROM race_snapshots
-        WHERE recorded_at >= $1
-        ORDER BY player_name, recorded_at DESC
+        SELECT DISTINCT ON (s.player_name)
+          s.player_name AS name, s.total_tokens AS "totalTokens",
+          s.total_cost AS "totalCost", s.recorded_at AS "updatedAt",
+          p.selected_skin  AS "skin",
+          p.selected_color AS "color",
+          p.flame_color    AS "flameColor"
+        FROM race_snapshots s
+        LEFT JOIN race_shop_profiles p ON p.player_name = s.player_name
+        WHERE s.recorded_at >= $1
+        ORDER BY s.player_name, s.recorded_at DESC
       `, [startOfLocalDay()]);
       const list = rows.map((r) => ({
         name: r.name,
@@ -124,6 +198,10 @@ const httpServer = createServer(async (req, res) => {
         // null when this player's latest report carried no cost
         totalCost: r.totalCost == null ? null : Number(r.totalCost),
         updatedAt: new Date(r.updatedAt).getTime(),
+        // Cosmetics from the shared shop (null when the player has no profile)
+        skin: r.skin || "default",
+        color: r.color || null,
+        flameColor: r.flameColor || null,
       }));
       return json(res, 200, { players: list });
     } catch (e) {
@@ -133,7 +211,7 @@ const httpServer = createServer(async (req, res) => {
   }
 
   if (urlPath === "/report" && req.method === "POST") {
-    const { token, totalTokens, totalCost } = await readBody(req);
+    const { token, totalTokens, totalCost, lifetimeCost } = await readBody(req);
     let payload;
     try { payload = jwt.verify(token, JWT_SECRET); } catch {
       return json(res, 401, { error: "Invalid token" });
@@ -149,6 +227,14 @@ const httpServer = createServer(async (req, res) => {
       typeof totalCost === "number" && isFinite(totalCost) && totalCost >= 0
         ? totalCost
         : null;
+    // lifetimeCost = the player's all-time USD spend on tokens, the wallet's
+    // "total_earned". Idempotent: each report SETs it via GREATEST so a partial
+    // sync that momentarily sums smaller can never shrink the wallet. Optional —
+    // a reporter that doesn't send it leaves the wallet untouched.
+    const lifetime =
+      typeof lifetimeCost === "number" && isFinite(lifetimeCost) && lifetimeCost >= 0
+        ? lifetimeCost
+        : null;
     // Write only the authenticated player's own row — never any other player's.
     // This is the whole anti-split-brain guarantee: stale values from other
     // instances can't exist because no instance writes data it doesn't own.
@@ -157,6 +243,16 @@ const httpServer = createServer(async (req, res) => {
         "INSERT INTO race_snapshots (player_name, total_tokens, total_cost) VALUES ($1, $2, $3)",
         [payload.name, value, cost]
       );
+      if (lifetime !== null) {
+        await db.query(
+          `INSERT INTO race_shop_profiles (player_name, total_earned)
+           VALUES ($1, $2)
+           ON CONFLICT (player_name) DO UPDATE
+             SET total_earned = GREATEST(race_shop_profiles.total_earned, EXCLUDED.total_earned),
+                 updated_at = NOW()`,
+          [payload.name, lifetime]
+        );
+      }
     } catch (e) {
       console.error("[db] report insert error", e.message);
       return json(res, 500, { error: "DB write failed" });
@@ -311,6 +407,151 @@ const httpServer = createServer(async (req, res) => {
     );
     console.log(`[admin] reset password for ${user.display_name}`);
     return json(res, 200, { ok: true, message: `Password reset to "${DEFAULT_PASSWORD}" for ${user.display_name}` });
+  }
+
+  // ── Shop: read a player's profile + wallet (public, for spectator render) ───
+  if (urlPath === "/shop/profile" && req.method === "GET") {
+    const name = qs.get("name");
+    if (!name) return json(res, 400, { error: "name required" });
+    try {
+      return json(res, 200, await getShopProfile(name));
+    } catch (e) {
+      console.error("[db] shop profile error", e.message);
+      return json(res, 500, { error: "DB read failed" });
+    }
+  }
+
+  // ── Shop: purchase history for a player (public) ────────────────────────────
+  if (urlPath === "/shop/purchases" && req.method === "GET") {
+    const name = qs.get("name");
+    if (!name) return json(res, 400, { error: "name required" });
+    try {
+      const { rows } = await db.query(
+        `SELECT skin_id AS "skinId", price, purchased_at AS "purchasedAt"
+         FROM race_purchases WHERE player_name = $1
+         ORDER BY purchased_at DESC LIMIT 100`,
+        [name]
+      );
+      return json(res, 200, { purchases: rows.map((r) => ({
+        skinId: r.skinId,
+        price: Number(r.price),
+        purchasedAt: new Date(r.purchasedAt).getTime(),
+      })) });
+    } catch (e) {
+      console.error("[db] shop purchases error", e.message);
+      return json(res, 500, { error: "DB read failed" });
+    }
+  }
+
+  // ── Shop: buy a skin (JWT) ──────────────────────────────────────────────────
+  // Server-authoritative: the price comes from SKIN_PRICES (never the client),
+  // and availableCoins is recomputed under a row lock so two concurrent buys
+  // can't both spend the same coins. Only ever touches the authenticated
+  // player's own row — same anti-split-brain rule as /report.
+  if (urlPath === "/shop/buy" && req.method === "POST") {
+    const { token, skinId } = await readBody(req);
+    let payload;
+    try { payload = jwt.verify(token, JWT_SECRET); } catch {
+      return json(res, 401, { error: "Invalid token" });
+    }
+    if (!skinId || !(skinId in SKIN_PRICES)) {
+      return json(res, 400, { error: "Unknown skin" });
+    }
+    const name = payload.name;
+    const price = SKIN_PRICES[skinId];
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "INSERT INTO race_shop_profiles (player_name) VALUES ($1) ON CONFLICT DO NOTHING",
+        [name]
+      );
+      const { rows } = await client.query(
+        "SELECT * FROM race_shop_profiles WHERE player_name = $1 FOR UPDATE",
+        [name]
+      );
+      const prof = rows[0];
+      const unlocked = prof.unlocked_skins || DEFAULT_UNLOCKED;
+      if (unlocked.includes(skinId)) {
+        await client.query("ROLLBACK");
+        return json(res, 409, { error: "Skin already owned" });
+      }
+      const available = Number(prof.total_earned) - Number(prof.spent_coins);
+      if (available < price) {
+        await client.query("ROLLBACK");
+        return json(res, 402, { error: "Insufficient coins" });
+      }
+      const newUnlocked = [...unlocked, skinId];
+      const newSpent = Number(prof.spent_coins) + price;
+      await client.query(
+        `UPDATE race_shop_profiles
+           SET spent_coins = $2, unlocked_skins = $3, selected_skin = $4, updated_at = NOW()
+         WHERE player_name = $1`,
+        [name, newSpent, newUnlocked, skinId]
+      );
+      await client.query(
+        "INSERT INTO race_purchases (player_name, skin_id, price) VALUES ($1, $2, $3)",
+        [name, skinId, price]
+      );
+      await client.query("COMMIT");
+    } catch (e) {
+      try { await client.query("ROLLBACK"); } catch {}
+      console.error("[db] shop buy error", e.message);
+      return json(res, 500, { error: "Purchase failed" });
+    } finally {
+      client.release();
+    }
+    return json(res, 200, await getShopProfile(name));
+  }
+
+  // ── Shop: equip cosmetics — no coin cost (JWT) ──────────────────────────────
+  // Changes selected skin (must already be owned), hull color and plasma color.
+  // Colors are either a #hex string or null (auto). Garbage is ignored field by
+  // field rather than rejecting the whole request.
+  if (urlPath === "/shop/equip" && req.method === "POST") {
+    const { token, selectedSkin, selectedColor, flameColor } = await readBody(req);
+    let payload;
+    try { payload = jwt.verify(token, JWT_SECRET); } catch {
+      return json(res, 401, { error: "Invalid token" });
+    }
+    const name = payload.name;
+    const validColor = (c) => c === null || (typeof c === "string" && /^#[0-9a-fA-F]{3,8}$/.test(c));
+
+    try {
+      await db.query(
+        "INSERT INTO race_shop_profiles (player_name) VALUES ($1) ON CONFLICT DO NOTHING",
+        [name]
+      );
+      const cur = await getShopProfile(name);
+
+      const sets = [];
+      const vals = [name];
+      let i = 2;
+      if (selectedSkin !== undefined) {
+        if (!cur.unlockedSkins.includes(selectedSkin)) {
+          return json(res, 403, { error: "Skin not owned" });
+        }
+        sets.push(`selected_skin = $${i++}`); vals.push(selectedSkin);
+      }
+      if (selectedColor !== undefined && validColor(selectedColor)) {
+        sets.push(`selected_color = $${i++}`); vals.push(selectedColor);
+      }
+      if (flameColor !== undefined && validColor(flameColor)) {
+        sets.push(`flame_color = $${i++}`); vals.push(flameColor);
+      }
+      if (sets.length) {
+        sets.push("updated_at = NOW()");
+        await db.query(
+          `UPDATE race_shop_profiles SET ${sets.join(", ")} WHERE player_name = $1`,
+          vals
+        );
+      }
+      return json(res, 200, await getShopProfile(name));
+    } catch (e) {
+      console.error("[db] shop equip error", e.message);
+      return json(res, 500, { error: "Equip failed" });
+    }
   }
 
   res.writeHead(404); res.end();

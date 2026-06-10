@@ -63,8 +63,14 @@ export async function POST() {
   // USD spent in the same window. copilot/cursor contribute 0 (subscription).
   const totalCost = agg._sum.cost ?? 0;
 
+  // All-time USD spend across every call — the shared shop wallet's "earned"
+  // balance. Reported alongside the windowed total so the wallet doesn't reset
+  // with the race window.
+  const lifeAgg = await prisma.call.aggregate({ _sum: { cost: true } });
+  const lifetimeCost = lifeAgg._sum.cost ?? 0;
+
   // Fire-and-forget push to race server
-  reportToRace(totalTokens, totalCost, racePeriod).catch(() => {});
+  reportToRace(totalTokens, totalCost, racePeriod, lifetimeCost).catch(() => {});
 
   // Snapshot daily balances (fire-and-forget — non-critical)
   snapshotDailyBalances().catch(() => {});

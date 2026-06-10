@@ -621,7 +621,13 @@ function RaceShell({ session, serverUrl, machineName = "", myTokens, lastRefresh
         )}
       </div>
 
-      <SkinShopModal isOpen={shopOpen} onClose={() => setShopOpen(false)} playerName={meName} />
+      <SkinShopModal
+        isOpen={shopOpen}
+        onClose={() => setShopOpen(false)}
+        playerName={meName}
+        serverUrl={serverUrl}
+        token={session.token}
+      />
 
       <ExitBtn onClick={handleExit} />
 

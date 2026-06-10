@@ -1,14 +1,14 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { X, ShoppingBag, Check, Lock, Zap, RefreshCw } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { X, ShoppingBag, Check, Lock, Zap, RefreshCw, History } from "lucide-react";
 import { getRocketConfig, saveRocketConfig, RocketConfig } from "@/lib/rocket-config";
 import { drawFlame, drawCyberUFO, drawCyberCruiser, drawCyberJet, drawCyberInterceptor, drawNeonSpeeder, drawCyberDrone } from "@/lib/rocket-renderer";
 
 interface Skin {
   id: string;
   name: string;
-  price: number; // USD
+  price: number; // USD — must match SKIN_PRICES in race-server/server.js
   icon: string;
   description: string;
 }
@@ -21,6 +21,8 @@ const SKINS: Skin[] = [
   { id: "speeder",     name: "Neon Speeder",     price: 20, icon: "🏎️", description: "Pod-racer inspired with dual engines." },
   { id: "interceptor", name: "Star Interceptor", price: 30, icon: "⚔️", description: "X-wing styled high-combat speeder." },
 ];
+
+const SKIN_NAME: Record<string, string> = Object.fromEntries(SKINS.map((s) => [s.id, s.name]));
 
 const COLORS = [
   { name: "Auto",      hex: null },
@@ -49,7 +51,9 @@ function Scanlines() {
   );
 }
 
+// Server shape returned by GET /shop/profile and POST /shop/buy|/shop/equip.
 interface ShopProfile {
+  playerName: string;
   selectedSkin: string;
   selectedColor: string | null;
   flameColor: string | null;
@@ -59,49 +63,80 @@ interface ShopProfile {
   availableCoins: number;
 }
 
+interface Purchase {
+  skinId: string;
+  price: number;
+  purchasedAt: number;
+}
+
 export default function SkinShopModal({
   isOpen,
   onClose,
   playerName,
+  // The shared race server is the single source of truth for the wallet,
+  // ownership and cosmetics — so every other player/spectator sees the same
+  // ship. localStorage is only kept as an instant-preview cache for "me".
+  serverUrl,
+  // JWT from the race session. Required to buy/equip (write); reads are public.
+  token,
 }: {
   isOpen: boolean;
   onClose: () => void;
   playerName?: string;
+  serverUrl?: string;
+  token?: string;
 }) {
   const [config, setConfig] = useState<RocketConfig | null>(null);
   const [profile, setProfile] = useState<ShopProfile | null>(null);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [previewBoost, setPreviewBoost] = useState(false);
   const [previewSkinId, setPreviewSkinId] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Load profile from DB + local config on open
+  // Push a server profile into all local state + the instant-preview cache.
+  const applyProfile = useCallback((data: ShopProfile) => {
+    setProfile(data);
+    const merged: RocketConfig = {
+      selectedColor: data.selectedColor,
+      flameColor: data.flameColor,
+      selectedSkin: data.selectedSkin,
+      unlockedSkins: data.unlockedSkins,
+      spentCoins: data.spentCoins,
+    };
+    setConfig(merged);
+    setPreviewSkinId(data.selectedSkin);
+    saveRocketConfig(merged);
+  }, []);
+
+  const refreshPurchases = useCallback(() => {
+    if (!serverUrl || !playerName) return;
+    fetch(`${serverUrl}/shop/purchases?name=${encodeURIComponent(playerName)}`)
+      .then((r) => r.json())
+      .then((d) => setPurchases(d.purchases ?? []))
+      .catch(() => {});
+  }, [serverUrl, playerName]);
+
+  // Load profile + purchases from the shared shop on open
   useEffect(() => {
     if (!isOpen) return;
+    setError(null);
+    // Seed from the local cache for an instant first paint
     const local = getRocketConfig();
     setConfig(local);
     setPreviewSkinId(local.selectedSkin);
 
-    if (!playerName) return;
+    if (!serverUrl || !playerName) return;
     setLoading(true);
-    fetch(`/api/rocket-profile?player=${encodeURIComponent(playerName)}`)
+    fetch(`${serverUrl}/shop/profile?name=${encodeURIComponent(playerName)}`)
       .then((r) => r.json())
-      .then((data: ShopProfile) => {
-        setProfile(data);
-        const merged: RocketConfig = {
-          selectedColor: data.selectedColor,
-          flameColor: data.flameColor,
-          selectedSkin: data.selectedSkin,
-          unlockedSkins: data.unlockedSkins,
-          spentCoins: data.spentCoins,
-        };
-        setConfig(merged);
-        setPreviewSkinId(data.selectedSkin);
-        saveRocketConfig(merged);
-      })
-      .catch(() => {})
+      .then((data: ShopProfile) => applyProfile(data))
+      .catch(() => setError("Cannot reach race server"))
       .finally(() => setLoading(false));
-  }, [isOpen, playerName]);
+    refreshPurchases();
+  }, [isOpen, playerName, serverUrl, applyProfile, refreshPurchases]);
 
   // Preview animation
   useEffect(() => {
@@ -156,60 +191,60 @@ export default function SkinShopModal({
 
   const availableCoins = profile?.availableCoins ?? 0;
   const totalEarned = profile?.totalEarned ?? 0;
+  const canWrite = !!serverUrl && !!token;
 
-  const saveToDb = async (newConfig: RocketConfig) => {
-    if (!playerName) return;
+  // Buy a skin — fully server-authoritative. The server validates ownership and
+  // recomputes the wallet, then returns the updated profile we apply verbatim.
+  const handleBuy = async (skin: Skin) => {
+    if (!canWrite) { setError("Log in to the race to buy"); return; }
+    if (availableCoins < skin.price) return;
+    setBusy(true); setError(null);
     try {
-      const res = await fetch("/api/rocket-profile", {
+      const res = await fetch(`${serverUrl}/shop/buy`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ playerName, ...newConfig }),
+        body: JSON.stringify({ token, skinId: skin.id }),
       });
       const data = await res.json();
-      if (data.availableCoins !== undefined) {
-        setProfile((p) => p ? { ...p, availableCoins: data.availableCoins, spentCoins: data.spentCoins } : p);
-      }
-    } catch {}
+      if (!res.ok) { setError(data.error || "Purchase failed"); return; }
+      applyProfile(data);
+      refreshPurchases();
+    } catch {
+      setError("Cannot reach race server");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const handleBuy = (skin: Skin) => {
-    if (availableCoins < skin.price) return;
-    const newSpent = config.spentCoins + skin.price;
-    const newConfig: RocketConfig = {
-      ...config,
-      spentCoins: newSpent,
-      unlockedSkins: [...config.unlockedSkins, skin.id],
-      selectedSkin: skin.id,
-    };
-    setConfig(newConfig);
-    setPreviewSkinId(skin.id);
-    setProfile((p) => p ? { ...p, availableCoins: availableCoins - skin.price, spentCoins: newSpent } : p);
-    saveRocketConfig(newConfig);
-    saveToDb(newConfig);
+  // Cosmetic change (no coin cost). Updates the local preview immediately, then
+  // persists to the shared shop and applies the authoritative response.
+  const equip = async (patch: Partial<Pick<RocketConfig, "selectedSkin" | "selectedColor" | "flameColor">>) => {
+    const optimistic = { ...config, ...patch };
+    setConfig(optimistic);
+    if (patch.selectedSkin) setPreviewSkinId(patch.selectedSkin);
+    saveRocketConfig(optimistic);
+    if (!canWrite) return;
+    try {
+      const res = await fetch(`${serverUrl}/shop/equip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, ...patch }),
+      });
+      const data = await res.json();
+      if (res.ok) applyProfile(data);
+      else setError(data.error || "Equip failed");
+    } catch {
+      setError("Cannot reach race server");
+    }
   };
 
   const handleSelect = (skinId: string) => {
     if (!config.unlockedSkins.includes(skinId)) return;
-    const newConfig = { ...config, selectedSkin: skinId };
-    setConfig(newConfig);
-    setPreviewSkinId(skinId);
-    saveRocketConfig(newConfig);
-    saveToDb(newConfig);
+    equip({ selectedSkin: skinId });
   };
 
-  const handleColorChange = (hex: string | null) => {
-    const newConfig = { ...config, selectedColor: hex };
-    setConfig(newConfig);
-    saveRocketConfig(newConfig);
-    saveToDb(newConfig);
-  };
-
-  const handleFlameChange = (hex: string | null) => {
-    const newConfig = { ...config, flameColor: hex };
-    setConfig(newConfig);
-    saveRocketConfig(newConfig);
-    saveToDb(newConfig);
-  };
+  const handleColorChange = (hex: string | null) => equip({ selectedColor: hex });
+  const handleFlameChange = (hex: string | null) => equip({ flameColor: hex });
 
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl">
@@ -230,7 +265,7 @@ export default function SkinShopModal({
               <span className="text-[13px] font-black text-[#00ffc8] tabular-nums tracking-widest font-mono">
                 ${availableCoins.toFixed(2)}
               </span>
-              {loading && <RefreshCw className="w-3 h-3 text-[#00ffc8]/50 animate-spin" />}
+              {(loading || busy) && <RefreshCw className="w-3 h-3 text-[#00ffc8]/50 animate-spin" />}
             </div>
           </div>
 
@@ -253,11 +288,17 @@ export default function SkinShopModal({
             <div className="absolute inset-0 bg-radial-gradient from-transparent to-[#0a0b14]/50 pointer-events-none" />
           </div>
 
+          {error && (
+            <div className="mt-4 text-[10px] font-mono text-[#ff6b8a] bg-[#ff324f]/10 border border-[#ff324f]/30 rounded px-3 py-1.5 max-w-[18rem] text-center">
+              {error}
+            </div>
+          )}
+
           <button
             onMouseDown={() => setPreviewBoost(true)}
             onMouseUp={() => setPreviewBoost(false)}
             onMouseLeave={() => setPreviewBoost(false)}
-            className={`mt-10 flex items-center gap-3 px-8 py-3 font-black uppercase tracking-[0.2em] transition-all border font-mono text-sm ${
+            className={`mt-8 flex items-center gap-3 px-8 py-3 font-black uppercase tracking-[0.2em] transition-all border font-mono text-sm ${
               previewBoost
                 ? "bg-[#ff9f59]/20 border-[#ff9f59] text-[#ff9f59] scale-95 shadow-[0_0_30px_rgba(255,159,89,0.4)] rounded-xl"
                 : "bg-[#00ffc8]/10 border-[#00ffc8]/50 text-[#00ffc8] hover:bg-[#00ffc8]/20 rounded-xl"
@@ -314,9 +355,9 @@ export default function SkinShopModal({
                         ) : (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleBuy(skin); }}
-                            disabled={!canAfford}
+                            disabled={!canAfford || busy}
                             className={`px-2 py-1 rounded font-black text-[10px] font-mono tracking-widest transition-all border ${
-                              canAfford
+                              canAfford && !busy
                                 ? "bg-[#00ffc8]/20 border-[#00ffc8] text-[#00ffc8] hover:bg-[#00ffc8]/40 shadow-[0_0_15px_rgba(0,255,200,0.3)]"
                                 : "bg-black/50 border-white/10 text-white/20 cursor-not-allowed"
                             }`}
@@ -392,6 +433,29 @@ export default function SkinShopModal({
               </div>
             </div>
           </div>
+
+          {/* Purchase history — pulled from the shared shop */}
+          {purchases.length > 0 && (
+            <div className="mt-8">
+              <h3 className="flex items-center gap-2 text-xs font-black text-[#00ffc8]/60 uppercase tracking-[0.3em] font-mono mb-3">
+                <History className="w-3.5 h-3.5" /> Purchase History
+              </h3>
+              <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                {purchases.map((p, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between text-[11px] font-mono px-3 py-1.5 rounded bg-white/2 border border-white/5"
+                  >
+                    <span className="text-white/70 tracking-wide">{SKIN_NAME[p.skinId] ?? p.skinId}</span>
+                    <span className="flex items-center gap-3">
+                      <span className="text-[#00ffc8]/80 tabular-nums">${p.price.toFixed(2)}</span>
+                      <span className="text-white/25">{new Date(p.purchasedAt).toLocaleDateString()}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

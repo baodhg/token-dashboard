@@ -52,17 +52,11 @@ model SyncState {
   @@map("sync_state")
 }
 
-model RocketProfile {
-  playerName    String   @id
-  selectedSkin  String   @default("default")
-  selectedColor String?
-  flameColor    String?
-  unlockedSkins String[] @default(["default"])
-  spentCoins    Float    @default(0)
-  updatedAt     DateTime @updatedAt @default(now())
-
-  @@map("rocket_profiles")
-}
+// Rocket shop (skins/colors/wallet) now lives on the SHARED race-server DB
+// (race_shop_profiles / race_purchases), so every player and spectator sees the
+// same ship. The old per-machine RocketProfile model + /api/rocket-profile route
+// were removed; lib/rocket-config.ts (localStorage) is kept only as an instant
+// preview cache for the current player.
 
 model DailyBalance {
   date        String
